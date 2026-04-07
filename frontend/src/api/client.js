@@ -38,6 +38,9 @@ const api = {
   getDocumentImageUrl: (id) =>
     `/api/documents/${id}/image`,
 
+  rotateDocument: (id, direction) =>
+    request('POST', `/api/documents/${id}/rotate`, { direction }),
+
   createLink: (docId, targetId, type, notes) =>
     request('POST', `/api/documents/${docId}/links`, {
       target_id: targetId, relationship_type: type, notes,

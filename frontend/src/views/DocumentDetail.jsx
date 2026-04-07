@@ -17,6 +17,8 @@ export default function DocumentDetail() {
   const [showLink, setShowLink] = useState(false)
   const [imgZoomed, setImgZoomed] = useState(false)
   const [showTranscription, setShowTranscription] = useState(false)
+  const [rotating, setRotating] = useState(false)
+  const [imgCacheBust, setImgCacheBust] = useState(0)
   const [archives, setArchives] = useState([])
 
   // Trash
@@ -88,6 +90,18 @@ export default function DocumentDetail() {
   const save = async (field, value) => {
     await api.updateDocument(id, { [field]: value })
     setDoc(prev => ({ ...prev, [field]: value }))
+  }
+
+  const handleRotate = async (direction) => {
+    setRotating(true)
+    try {
+      await api.rotateDocument(id, direction)
+      setImgCacheBust(v => v + 1)
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setRotating(false)
+    }
   }
 
   const handleDeleteLink = async (linkId) => {
@@ -268,25 +282,50 @@ export default function DocumentDetail() {
         <div style={{ padding: '1.5rem 2rem', borderRight: '1px solid var(--border)' }}>
 
           {/* Image */}
-          <div
-            style={{ position: 'relative', cursor: 'zoom-in', marginBottom: '1.5rem' }}
-            onClick={() => setImgZoomed(true)}
-          >
-            <img
-              src={imgUrl}
-              alt={doc.title || doc.filename}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '60vh',
-                display: 'block',
-                objectFit: 'contain',
-                border: '1px solid var(--border)',
-                borderRadius: '3px',
-                background: 'var(--navy-deep)',
-              }}
-            />
-            <div style={{ position: 'absolute', bottom: '0.5rem', right: '0.5rem', background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: '0.75rem', padding: '2px 6px', borderRadius: '2px' }}>
-              Click to zoom
+          <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
+            <div style={{ cursor: 'zoom-in' }} onClick={() => setImgZoomed(true)}>
+              <img
+                src={`${imgUrl}?v=${imgCacheBust}`}
+                alt={doc.title || doc.filename}
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '60vh',
+                  display: 'block',
+                  objectFit: 'contain',
+                  border: '1px solid var(--border)',
+                  borderRadius: '3px',
+                  background: 'var(--navy-deep)',
+                  opacity: rotating ? 0.5 : 1,
+                  transition: 'opacity 0.2s',
+                }}
+              />
+              <div style={{ position: 'absolute', bottom: '0.5rem', right: '0.5rem', background: 'rgba(0,0,0,0.5)', color: 'white', fontSize: '0.75rem', padding: '2px 6px', borderRadius: '2px' }}>
+                Click to zoom
+              </div>
+            </div>
+            {/* Rotate buttons */}
+            <div style={{ position: 'absolute', top: '0.5rem', right: '0.5rem', display: 'flex', gap: '0.25rem' }}>
+              {[['↺', 'ccw', 'Rotate counter-clockwise'], ['↻', 'cw', 'Rotate clockwise']].map(([icon, dir, label]) => (
+                <button
+                  key={dir}
+                  onClick={() => handleRotate(dir)}
+                  disabled={rotating}
+                  title={label}
+                  style={{
+                    background: 'rgba(0,0,0,0.55)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    padding: '3px 8px',
+                    cursor: rotating ? 'not-allowed' : 'pointer',
+                    fontSize: '1rem',
+                    lineHeight: 1,
+                    opacity: rotating ? 0.5 : 1,
+                  }}
+                >
+                  {icon}
+                </button>
+              ))}
             </div>
           </div>
 

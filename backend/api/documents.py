@@ -326,6 +326,49 @@ def list_archives():
     return jsonify({"archives": [r["source_archive"] for r in rows]})
 
 
+@bp.route("/api/documents/<int:doc_id>/rotate", methods=["POST"])
+def rotate_document_image(doc_id):
+    """Rotate the source photo 90° clockwise or counter-clockwise and update sha256."""
+    from PIL import Image as PILImage
+    import hashlib
+
+    PHOTOS_DIR, _, _, get_db, _, row_to_dict = _get_deps()
+
+    data      = request.get_json(silent=True) or {}
+    direction = data.get("direction", "cw")   # "cw" or "ccw"
+    degrees   = -90 if direction == "cw" else 90   # PIL rotates counter-clockwise
+
+    with get_db() as conn:
+        doc = conn.execute(
+            "SELECT filename FROM documents WHERE id=?", (doc_id,)
+        ).fetchone()
+        if not doc:
+            abort(404)
+
+    image_path = PHOTOS_DIR / doc["filename"]
+    if not image_path.exists():
+        abort(404)
+
+    with PILImage.open(image_path) as img:
+        rotated = img.rotate(degrees, expand=True)
+        rotated.save(str(image_path))
+
+    # Recompute sha256 for the modified file
+    h = hashlib.sha256()
+    with image_path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    new_sha = h.hexdigest()
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE documents SET sha256=?, updated_at=datetime('now') WHERE id=?",
+            (new_sha, doc_id)
+        )
+
+    return jsonify({"ok": True})
+
+
 @bp.route("/api/documents/<int:doc_id>/links/<int:link_id>", methods=["DELETE"])
 def delete_link(doc_id, link_id):
     PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
