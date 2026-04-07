@@ -9,12 +9,14 @@ Handles API errors with exponential back-off (3 retries).
 """
 
 import base64
+import io
 import json
 import time
 import logging
 from pathlib import Path
 
 import anthropic
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -88,10 +90,11 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
     """
     client = anthropic.Anthropic(api_key=api_key)
 
-    # Read and encode image
-    image_bytes = image_path.read_bytes()
-    image_b64   = base64.standard_b64encode(image_bytes).decode("utf-8")
-    media_type  = _get_media_type(image_path)
+    # Read and resize if needed; _prepare_image re-encodes as JPEG when resizing
+    original_bytes = image_path.read_bytes()
+    image_bytes    = _prepare_image(image_path, original_bytes)
+    image_b64      = base64.standard_b64encode(image_bytes).decode("utf-8")
+    media_type     = "image/jpeg" if image_bytes is not original_bytes else _get_media_type(image_path)
 
     last_error = None
     for attempt in range(3):
@@ -152,6 +155,58 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
         "tags":              ["extraction-failed"],
         "key_evidence":      False,
     }
+
+
+_MAX_BYTES = 3_932_160   # 3.75 MB — leaves headroom under Claude's 5 MB base64 limit
+_MAX_DIM   = 8000        # Claude's max dimension in either direction
+
+
+
+def _prepare_image(path: Path, raw: bytes) -> bytes:
+    """
+    Return image bytes ready for the API.
+    If the image exceeds Claude's limits, resize it down and re-encode as JPEG.
+    Otherwise return the same `raw` bytes object unchanged (caller uses identity
+    check to determine the correct media type).
+    """
+    if len(raw) <= _MAX_BYTES:
+        with Image.open(path) as img:
+            if img.width <= _MAX_DIM and img.height <= _MAX_DIM:
+                return raw  # already within limits
+
+    with Image.open(path) as img:
+        # Convert palette/RGBA modes so JPEG encoding works
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        # Downscale if either dimension exceeds the max
+        if img.width > _MAX_DIM or img.height > _MAX_DIM:
+            img.thumbnail((_MAX_DIM, _MAX_DIM), Image.LANCZOS)
+
+        # Iteratively lower JPEG quality until the file fits
+        quality = 92
+        while quality >= 40:
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            data = buf.getvalue()
+            if len(data) <= _MAX_BYTES:
+                logger.info(
+                    "Resized %s: %d bytes → %d bytes (quality=%d, size=%dx%d)",
+                    path.name, len(raw), len(data), quality, img.width, img.height,
+                )
+                return data
+            quality -= 10
+
+        # Last resort: halve the resolution and try again
+        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=75)
+        data = buf.getvalue()
+        logger.warning(
+            "Aggressively resized %s to %dx%d (%d bytes)",
+            path.name, img.width, img.height, len(data),
+        )
+        return data
 
 
 def _get_media_type(path: Path) -> str:
