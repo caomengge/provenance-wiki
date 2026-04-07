@@ -204,8 +204,8 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
             """INSERT OR IGNORE INTO documents
                (filename, sha256, title, date_depicted, date_range_start, date_range_end,
                 location, medium, dimensions, description, language,
-                raw_claude_response, is_key_evidence, embedding_json, source_archive)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                raw_claude_response, transcription, is_key_evidence, embedding_json, source_archive)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 photo_path.name,
                 sha,
@@ -219,6 +219,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                 data.get("description"),
                 data.get("language"),
                 json.dumps(data),
+                data.get("transcription"),
                 1 if data.get("key_evidence") else 0,
                 json.dumps(embedding) if embedding else None,
                 source_archive or None,

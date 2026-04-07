@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS documents (
     description      TEXT,
     language         TEXT,
     raw_claude_response TEXT,
+    transcription    TEXT,
     annotation       TEXT,
     is_key_evidence  INTEGER NOT NULL DEFAULT 0,
     is_trashed       INTEGER NOT NULL DEFAULT 0,
@@ -202,6 +203,7 @@ def init_db():
         # Migrations: add columns that may not exist in older databases
         _migrate(conn, "ALTER TABLE documents ADD COLUMN is_trashed INTEGER NOT NULL DEFAULT 0")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN source_archive TEXT")
+        _migrate(conn, "ALTER TABLE documents ADD COLUMN transcription TEXT")
     return True
 
 

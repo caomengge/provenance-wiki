@@ -58,6 +58,7 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
       "notes": "any additional details about the transaction or null"
     }
   ],
+  "transcription": "faithful word-for-word transcription of ALL visible text in the document, preserving original spelling, punctuation, and line breaks. Non-English text (Chinese, German, Hebrew, French, etc.) must be reproduced exactly as written — do not translate. Use [illegible] for unreadable words. Use [image] for non-text elements. If the document has no readable text, set this to null.",
   "tags": ["relevant", "keyword", "tags", "describing", "this", "document"],
   "key_evidence": false
 }
