@@ -16,6 +16,7 @@ export default function DocumentDetail() {
   const [error, setError]       = useState('')
   const [showLink, setShowLink] = useState(false)
   const [imgZoomed, setImgZoomed] = useState(false)
+  const [showTranscription, setShowTranscription] = useState(false)
   const [archives, setArchives] = useState([])
 
   // Trash
@@ -174,6 +175,9 @@ export default function DocumentDetail() {
             onToggle={(v) => setDoc(prev => ({ ...prev, is_key_evidence: v ? 1 : 0 }))}
           />
           <button className="btn btn-ghost" onClick={() => setShowLink(true)}>⛓ Link Document</button>
+          {doc.raw_claude_response && (
+            <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>📄 Transcription</button>
+          )}
           <a
             href="#"
             className="btn btn-ghost"
@@ -571,6 +575,72 @@ export default function DocumentDetail() {
           />
         </div>
       )}
+
+      {/* Transcription modal */}
+      {showTranscription && (() => {
+        let raw = {}
+        try { raw = JSON.parse(doc.raw_claude_response) } catch (_) {}
+        return (
+          <div className="modal-overlay" onClick={() => setShowTranscription(false)}>
+            <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Claude Extraction</h2>
+                <button onClick={() => setShowTranscription(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>✕</button>
+              </div>
+              <div style={{ overflowY: 'auto', flex: 1, fontSize: '0.9rem', lineHeight: 1.7 }}>
+                {raw.description && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Description</div>
+                    <p style={{ margin: 0, color: 'var(--text-body)' }}>{raw.description}</p>
+                  </div>
+                )}
+                {raw.entities?.length > 0 && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Entities</div>
+                    {raw.entities.map((e, i) => (
+                      <div key={i} style={{ marginBottom: '0.4rem', paddingLeft: '0.75rem', borderLeft: '2px solid var(--border)' }}>
+                        <strong>{e.name}</strong>
+                        {e.type && <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}> · {e.type}</span>}
+                        {e.role && <span style={{ color: 'var(--text-muted)', fontSize: '0.82rem' }}> · {e.role}</span>}
+                        {e.context && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>{e.context}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {raw.transactions?.length > 0 && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Transactions</div>
+                    {raw.transactions.map((t, i) => (
+                      <div key={i} style={{ marginBottom: '0.5rem', paddingLeft: '0.75rem', borderLeft: '2px solid var(--gold)' }}>
+                        {t.date && <div style={{ fontWeight: 600 }}>{t.date}</div>}
+                        {(t.seller || t.buyer) && <div>{t.seller && `From: ${t.seller}`}{t.seller && t.buyer && ' → '}{t.buyer && `To: ${t.buyer}`}</div>}
+                        {t.price && <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{t.currency} {Number(t.price).toLocaleString()}{t.auction_house && ` · ${t.auction_house}`}</div>}
+                        {t.notes && <div style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>{t.notes}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {raw.tags?.length > 0 && (
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Tags</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      {raw.tags.map((t, i) => (
+                        <span key={i} style={{ background: 'var(--cream-card)', border: '1px solid var(--border)', borderRadius: '3px', padding: '0.1rem 0.5rem', fontSize: '0.82rem' }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Raw JSON</div>
+                  <pre style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--cream-card)', padding: '0.75rem', borderRadius: '3px', border: '1px solid var(--border)' }}>
+                    {JSON.stringify(raw, null, 2)}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Link modal */}
       {showLink && (
