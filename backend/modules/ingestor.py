@@ -102,16 +102,15 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
         for p in all_files:
             sha = _sha256(p)
             if not document_exists_by_sha256(sha):
-                pending.append((p, sha))
+                pending.append((p, sha, None))
             else:
-                # Check if it was a failed extraction — if so, delete and retry
+                # Check if it was a failed extraction — if so, re-queue for UPDATE
                 with get_db() as conn:
                     row = conn.execute(
                         "SELECT id, description FROM documents WHERE sha256=?", (sha,)
                     ).fetchone()
                     if row and row["description"] and row["description"].startswith("Extraction failed"):
-                        conn.execute("DELETE FROM documents WHERE id=?", (row["id"],))
-                        pending.append((p, sha))
+                        pending.append((p, sha, row["id"]))
                         logger.info("Queued for retry (previous extraction failed): %s", p.name)
 
         skipped = total - len(pending)
@@ -133,7 +132,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
         for batch_start in range(0, len(pending), batch_size):
             batch = pending[batch_start: batch_start + batch_size]
 
-            for idx, (photo_path, sha) in enumerate(batch):
+            for idx, (photo_path, sha, existing_id) in enumerate(batch):
                 global_idx = batch_start + idx
                 _emit({
                     "type":     "processing",
@@ -147,7 +146,8 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                     _process_single(photo_path, sha, api_key, get_db,
                                     upsert_entity, get_or_create_tag,
                                     extract_from_image, generate_text_embedding,
-                                    source_archive=source_archive)
+                                    source_archive=source_archive,
+                                    existing_id=existing_id)
                     processed += 1
                     _emit({
                         "type":      "done_file",
@@ -186,7 +186,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
 
 def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     get_or_create_tag, extract_from_image, generate_text_embedding,
-                    source_archive: str = None):
+                    source_archive: str = None, existing_id: int = None):
     """Extract data from one photo and write everything to the database."""
     data = extract_from_image(photo_path, api_key)
 
@@ -199,37 +199,76 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
     embedding = generate_text_embedding(embed_text, api_key)
 
     with get_db() as conn:
-        # Insert document row
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO documents
-               (filename, sha256, title, date_depicted, date_range_start, date_range_end,
-                location, medium, dimensions, description, language,
-                raw_claude_response, transcription, is_key_evidence, embedding_json, source_archive)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                photo_path.name,
-                sha,
-                data.get("title"),
-                data.get("date_depicted"),
-                data.get("date_range_start"),
-                data.get("date_range_end"),
-                data.get("location"),
-                data.get("medium"),
-                data.get("dimensions"),
-                data.get("description"),
-                data.get("language"),
-                json.dumps(data),
-                data.get("transcription"),
-                1 if data.get("key_evidence") else 0,
-                json.dumps(embedding) if embedding else None,
-                source_archive or None,
-            ),
-        )
-        if cur.lastrowid == 0:
-            # Already exists (race condition guard)
-            return
-
-        doc_id = cur.lastrowid
+        if existing_id:
+            # UPDATE existing record in-place (preserves annotation, tags, links)
+            conn.execute(
+                """UPDATE documents SET
+                    title               = ?,
+                    date_depicted       = ?,
+                    date_range_start    = ?,
+                    date_range_end      = ?,
+                    location            = ?,
+                    medium              = ?,
+                    dimensions          = ?,
+                    description         = ?,
+                    language            = ?,
+                    raw_claude_response = ?,
+                    transcription       = ?,
+                    is_key_evidence     = ?,
+                    embedding_json      = ?,
+                    source_archive      = COALESCE(source_archive, ?),
+                    updated_at          = datetime('now')
+                   WHERE id = ?""",
+                (
+                    data.get("title"),
+                    data.get("date_depicted"),
+                    data.get("date_range_start"),
+                    data.get("date_range_end"),
+                    data.get("location"),
+                    data.get("medium"),
+                    data.get("dimensions"),
+                    data.get("description"),
+                    data.get("language"),
+                    json.dumps(data),
+                    data.get("transcription"),
+                    1 if data.get("key_evidence") else 0,
+                    json.dumps(embedding) if embedding else None,
+                    source_archive or None,
+                    existing_id,
+                )
+            )
+            doc_id = existing_id
+        else:
+            # INSERT new document row
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO documents
+                   (filename, sha256, title, date_depicted, date_range_start, date_range_end,
+                    location, medium, dimensions, description, language,
+                    raw_claude_response, transcription, is_key_evidence, embedding_json, source_archive)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    photo_path.name,
+                    sha,
+                    data.get("title"),
+                    data.get("date_depicted"),
+                    data.get("date_range_start"),
+                    data.get("date_range_end"),
+                    data.get("location"),
+                    data.get("medium"),
+                    data.get("dimensions"),
+                    data.get("description"),
+                    data.get("language"),
+                    json.dumps(data),
+                    data.get("transcription"),
+                    1 if data.get("key_evidence") else 0,
+                    json.dumps(embedding) if embedding else None,
+                    source_archive or None,
+                ),
+            )
+            if cur.lastrowid == 0:
+                # Already exists (race condition guard)
+                return
+            doc_id = cur.lastrowid
 
         # Insert entities
         for ent in (data.get("entities") or []):

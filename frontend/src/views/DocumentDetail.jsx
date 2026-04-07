@@ -19,6 +19,8 @@ export default function DocumentDetail() {
   const [showTranscription, setShowTranscription] = useState(false)
   const [rotating, setRotating] = useState(false)
   const [imgCacheBust, setImgCacheBust] = useState(0)
+  const [wipeModalOpen, setWipeModalOpen] = useState(false)
+  const [wiping, setWiping] = useState(false)
   const [archives, setArchives] = useState([])
 
   // Trash
@@ -101,6 +103,19 @@ export default function DocumentDetail() {
       alert(err.message)
     } finally {
       setRotating(false)
+    }
+  }
+
+  const handleWipe = async () => {
+    setWiping(true)
+    try {
+      await api.wipeDocument(id)
+      setWipeModalOpen(false)
+      load()
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setWiping(false)
     }
   }
 
@@ -223,6 +238,31 @@ export default function DocumentDetail() {
             title={doc.is_trashed ? 'Restore from trash' : 'Move to trash'}
           >
             {doc.is_trashed ? '↩ Restore' : '🗑 Trash'}
+          </button>
+          <button
+            onClick={() => setWipeModalOpen(true)}
+            style={{
+              background: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: '3px',
+              padding: '0.25rem 0.6rem',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              color: 'var(--text-muted)',
+              fontFamily: 'inherit',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = 'var(--rust)'
+              e.currentTarget.style.borderColor = 'var(--rust)'
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = 'var(--text-muted)'
+              e.currentTarget.style.borderColor = 'var(--border)'
+            }}
+            title="Clear extracted metadata and re-queue for extraction"
+          >
+            ⟳ Wipe Metadata
           </button>
           <button
             onClick={() => setDeleteModalOpen(true)}
@@ -537,6 +577,45 @@ export default function DocumentDetail() {
           </div>
         </div>
       </div>
+
+      {/* Wipe metadata confirmation modal */}
+      {wipeModalOpen && (
+        <div className="modal-overlay" onClick={() => !wiping && setWipeModalOpen(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px' }}>
+            <h2 style={{ marginBottom: '0.75rem', fontSize: '1.15rem', color: 'var(--rust)' }}>Wipe Extracted Metadata?</h2>
+            <p style={{ fontSize: '0.92rem', lineHeight: 1.7, color: 'var(--text-body)', marginBottom: '0.75rem' }}>
+              This will permanently clear all Claude-extracted data from this document:
+            </p>
+            <ul style={{ fontSize: '0.9rem', lineHeight: 1.8, color: 'var(--rust)', paddingLeft: '1.25rem', marginBottom: '1rem' }}>
+              <li>Title, date, location, medium, dimensions, language</li>
+              <li>Description and transcription</li>
+              <li>All extracted entities and transactions</li>
+              <li>Key evidence flag</li>
+            </ul>
+            <p style={{ fontSize: '0.92rem', lineHeight: 1.7, color: 'var(--text-body)', marginBottom: '0.75rem' }}>
+              The following will <strong>not</strong> be affected:
+            </p>
+            <ul style={{ fontSize: '0.9rem', lineHeight: 1.8, color: 'var(--text-body)', paddingLeft: '1.25rem', marginBottom: '1rem' }}>
+              <li>The original photo file</li>
+              <li>Your researcher annotation</li>
+              <li>Tags and document links</li>
+            </ul>
+            <p style={{ fontSize: '0.9rem', lineHeight: 1.7, color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
+              The document will be re-queued for extraction the next time you run Ingest.
+            </p>
+            <div className="modal-actions">
+              <button className="btn btn-ghost" onClick={() => setWipeModalOpen(false)} disabled={wiping}>Cancel</button>
+              <button
+                onClick={handleWipe}
+                disabled={wiping}
+                style={{ background: 'var(--rust)', color: 'white', border: 'none', borderRadius: '3px', padding: '0.5rem 1.1rem', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.9rem', fontWeight: 600, opacity: wiping ? 0.7 : 1 }}
+              >
+                {wiping ? 'Wiping…' : 'Wipe Metadata'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirmation modal */}
       {deleteModalOpen && (

@@ -326,6 +326,47 @@ def list_archives():
     return jsonify({"archives": [r["source_archive"] for r in rows]})
 
 
+@bp.route("/api/documents/<int:doc_id>/wipe", methods=["POST"])
+def wipe_document_metadata(doc_id):
+    """
+    Clear all Claude-extracted metadata from a document in-place.
+    Preserves: photo file, annotation, tags, document links.
+    Clears: title, date, location, medium, dimensions, description,
+            language, transcription, raw_claude_response, key_evidence,
+            all entities, all transactions.
+    Sets description to trigger re-extraction on next ingest run.
+    """
+    PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM documents WHERE id=?", (doc_id,)).fetchone():
+            abort(404)
+
+        # Clear all extracted fields; keep annotation, tags, links untouched
+        conn.execute(
+            """UPDATE documents SET
+                title                = filename,
+                date_depicted        = NULL,
+                date_range_start     = NULL,
+                date_range_end       = NULL,
+                location             = NULL,
+                medium               = NULL,
+                dimensions           = NULL,
+                description          = 'Extraction failed: metadata wiped by user',
+                language             = NULL,
+                transcription        = NULL,
+                raw_claude_response  = NULL,
+                is_key_evidence      = 0,
+                updated_at           = datetime('now')
+               WHERE id = ?""",
+            (doc_id,)
+        )
+        conn.execute("DELETE FROM document_entities WHERE document_id = ?", (doc_id,))
+        conn.execute("DELETE FROM transactions       WHERE document_id = ?", (doc_id,))
+
+    return jsonify({"ok": True})
+
+
 @bp.route("/api/documents/<int:doc_id>/rotate", methods=["POST"])
 def rotate_document_image(doc_id):
     """Rotate the source photo 90° clockwise or counter-clockwise and update sha256."""
