@@ -157,7 +157,7 @@ def get_network(
             nodes[f"grp_{g['id']}"] = {
                 "id":              f"grp_{g['id']}",
                 "db_id":           g["id"],
-                "type":            "group",
+                "type":            "document",
                 "label":           g["title"] or f"Group #{g['id']}",
                 "date":            g["date_depicted"],
                 "is_key_evidence": bool(g["is_key_evidence"]),
