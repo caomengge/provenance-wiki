@@ -2,8 +2,9 @@ import React, { useState } from 'react'
 import api from '../api/client'
 
 /**
- * Toggle star button for marking a document as key evidence.
- * Persists to the API on click.
+ * Toggle star button for marking a document or group as key evidence.
+ * If onToggle is provided it handles persistence; otherwise falls back to
+ * api.updateDocument for standalone documents.
  */
 export default function EvidenceFlag({ docId, initial = false, onToggle }) {
   const [flagged, setFlagged] = useState(initial)
@@ -15,9 +16,12 @@ export default function EvidenceFlag({ docId, initial = false, onToggle }) {
     const next = !flagged
     setLoading(true)
     try {
-      await api.updateDocument(docId, { is_key_evidence: next ? 1 : 0 })
+      if (onToggle) {
+        await onToggle(next)
+      } else {
+        await api.updateDocument(docId, { is_key_evidence: next ? 1 : 0 })
+      }
       setFlagged(next)
-      if (onToggle) onToggle(next)
     } catch (err) {
       console.error('Failed to update key evidence flag:', err)
     } finally {

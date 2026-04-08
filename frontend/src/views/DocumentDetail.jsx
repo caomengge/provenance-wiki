@@ -201,7 +201,10 @@ export default function DocumentDetail() {
           <EvidenceFlag
             docId={doc.id}
             initial={!!doc.is_key_evidence}
-            onToggle={(v) => setDoc(prev => ({ ...prev, is_key_evidence: v ? 1 : 0 }))}
+            onToggle={async (v) => {
+              await api.updateDocument(doc.id, { is_key_evidence: v ? 1 : 0 })
+              setDoc(prev => ({ ...prev, is_key_evidence: v ? 1 : 0 }))
+            }}
           />
           <button className="btn btn-ghost" onClick={() => setShowLink(true)}>⛓ Link Document</button>
           {doc.raw_claude_response && (
