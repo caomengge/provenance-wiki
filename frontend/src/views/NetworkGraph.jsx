@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, useNavigate } from 'react-router-dom'
 import * as d3 from 'd3'
 import api from '../api/client'
 import DocPreviewPanel from '../components/DocPreviewPanel'
@@ -30,6 +30,7 @@ export default function NetworkGraph() {
   const [loading, setLoading]   = useState(true)
   const [selected, setSelected] = useState(null)
   const [searchParams]          = useSearchParams()
+  const navigate                = useNavigate()
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('')
@@ -247,11 +248,18 @@ export default function NetworkGraph() {
             {selected.type === 'document' && (
               <>
                 {selected.date && <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>📅 {selected.date}</div>}
+                {selected.page_count && <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>⊞ {selected.page_count} pages</div>}
                 {selected.is_key_evidence && <div style={{ fontSize: '0.82rem', color: 'var(--rust)', marginTop: '0.25rem' }}>★ Key Evidence</div>}
                 <button
                   className="btn btn-primary"
                   style={{ marginTop: '0.75rem', width: '100%', fontSize: '0.85rem' }}
-                  onClick={() => setPreviewDocId(selected.db_id)}
+                  onClick={() => {
+                    if (selected.id.startsWith('grp_')) {
+                      navigate(`/groups/${selected.db_id}`)
+                    } else {
+                      setPreviewDocId(selected.db_id)
+                    }
+                  }}
                 >
                   Open Document →
                 </button>
