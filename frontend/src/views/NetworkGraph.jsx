@@ -291,8 +291,8 @@ export default function NetworkGraph() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                         {entityDocs.map(doc => (
                           <button
-                            key={doc.id}
-                            onClick={() => setPreviewDocId(doc.id)}
+                            key={`${doc.record_type}-${doc.id}`}
+                            onClick={() => doc.record_type === 'group' ? navigate(`/groups/${doc.id}`) : setPreviewDocId(doc.id)}
                             style={{
                               background: 'var(--cream-bg)',
                               border: '1px solid var(--border)',
@@ -311,6 +311,9 @@ export default function NetworkGraph() {
                             onMouseLeave={e => e.currentTarget.style.background = 'var(--cream-bg)'}
                           >
                             <span style={{ fontWeight: 600, lineHeight: 1.3 }}>
+                              {doc.record_type === 'group' && (
+                                <span style={{ fontSize: '0.68rem', background: 'var(--navy)', color: 'white', borderRadius: '2px', padding: '0 3px', marginRight: '4px', verticalAlign: 'middle' }}>⊞</span>
+                              )}
                               {(doc.title || doc.filename || `Document #${doc.id}`).substring(0, 36)}
                               {(doc.title || doc.filename || '').length > 36 ? '…' : ''}
                             </span>

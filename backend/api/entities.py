@@ -53,9 +53,17 @@ def list_entities():
 
         rows = conn.execute(
             f"""SELECT e.id, e.name, e.type, e.normalized_name, e.created_at,
-                       COUNT(DISTINCT de.document_id) as doc_count
+                       (SELECT COUNT(DISTINCT de.document_id)
+                        FROM document_entities de
+                        JOIN documents d ON d.id = de.document_id
+                        WHERE de.entity_id = e.id AND d.group_id IS NULL AND d.is_trashed = 0
+                       ) +
+                       (SELECT COUNT(DISTINCT ge.group_id)
+                        FROM group_entities ge
+                        JOIN document_groups g ON g.id = ge.group_id
+                        WHERE ge.entity_id = e.id AND g.is_trashed = 0
+                       ) AS doc_count
                 FROM entities e
-                LEFT JOIN document_entities de ON de.entity_id = e.id
                 {where_sql}
                 GROUP BY e.id
                 ORDER BY doc_count DESC, e.name
@@ -84,33 +92,57 @@ def get_entity(entity_id):
 
         entity = row_to_dict(entity)
 
-        # Count and sample of documents
+        # Standalone documents (not grouped)
         docs = conn.execute(
-            """SELECT d.id, d.title, d.filename, d.date_depicted, de.role
+            """SELECT d.id, d.title, d.filename, d.date_depicted, de.role,
+                      'document' as record_type
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ?
+               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0
                ORDER BY d.date_depicted NULLS LAST
                LIMIT 50""",
             (entity_id,)
         ).fetchall()
 
-        # Co-occurring entities
+        # Groups that mention this entity
+        groups = conn.execute(
+            """SELECT g.id, g.title, g.date_depicted, ge.role,
+                      'group' as record_type
+               FROM group_entities ge
+               JOIN document_groups g ON g.id = ge.group_id
+               WHERE ge.entity_id = ? AND g.is_trashed = 0
+               ORDER BY g.date_depicted NULLS LAST
+               LIMIT 50""",
+            (entity_id,)
+        ).fetchall()
+
+        all_docs = rows_to_list(docs) + rows_to_list(groups)
+
+        # Co-occurring entities (from standalone docs + groups)
         co_entities = conn.execute(
             """SELECT e.id, e.name, e.type, COUNT(*) as co_count
                FROM document_entities de1
                JOIN document_entities de2 ON de2.document_id = de1.document_id
                    AND de2.entity_id != de1.entity_id
                JOIN entities e ON e.id = de2.entity_id
-               WHERE de1.entity_id = ?
+               JOIN documents d ON d.id = de1.document_id
+               WHERE de1.entity_id = ? AND d.group_id IS NULL
+               GROUP BY e.id
+               UNION ALL
+               SELECT e.id, e.name, e.type, COUNT(*) as co_count
+               FROM group_entities ge1
+               JOIN group_entities ge2 ON ge2.group_id = ge1.group_id
+                   AND ge2.entity_id != ge1.entity_id
+               JOIN entities e ON e.id = ge2.entity_id
+               WHERE ge1.entity_id = ?
                GROUP BY e.id
                ORDER BY co_count DESC
                LIMIT 20""",
-            (entity_id,)
+            (entity_id, entity_id)
         ).fetchall()
 
-        entity["documents"]    = rows_to_list(docs)
-        entity["doc_count"]    = len(entity["documents"])
+        entity["documents"]    = all_docs
+        entity["doc_count"]    = len(all_docs)
         entity["co_entities"]  = rows_to_list(co_entities)
 
     return jsonify(entity)
@@ -130,24 +162,53 @@ def entity_documents(entity_id):
         if not conn.execute("SELECT 1 FROM entities WHERE id=?", (entity_id,)).fetchone():
             abort(404)
 
-        total = conn.execute(
-            "SELECT COUNT(*) as cnt FROM document_entities WHERE entity_id=?",
+        doc_count = conn.execute(
+            """SELECT COUNT(*) as cnt FROM document_entities de
+               JOIN documents d ON d.id = de.document_id
+               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0""",
             (entity_id,)
         ).fetchone()["cnt"]
 
-        rows = conn.execute(
+        grp_count = conn.execute(
+            """SELECT COUNT(*) as cnt FROM group_entities ge
+               JOIN document_groups g ON g.id = ge.group_id
+               WHERE ge.entity_id = ? AND g.is_trashed = 0""",
+            (entity_id,)
+        ).fetchone()["cnt"]
+
+        total = doc_count + grp_count
+
+        doc_rows = conn.execute(
             """SELECT d.id, d.title, d.filename, d.date_depicted, d.date_range_start,
-                      d.is_key_evidence, d.medium, de.role, de.context
+                      d.is_key_evidence, d.medium, de.role, de.context,
+                      'document' as record_type
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ?
-               ORDER BY d.date_depicted NULLS LAST, d.created_at
-               LIMIT ? OFFSET ?""",
-            (entity_id, per_page, offset)
+               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0
+               ORDER BY d.date_depicted NULLS LAST, d.created_at""",
+            (entity_id,)
         ).fetchall()
 
+        grp_rows = conn.execute(
+            """SELECT g.id, g.title, NULL as filename,
+                      g.date_depicted, g.date_range_start,
+                      g.is_key_evidence, g.medium, ge.role, ge.context,
+                      'group' as record_type
+               FROM group_entities ge
+               JOIN document_groups g ON g.id = ge.group_id
+               WHERE ge.entity_id = ? AND g.is_trashed = 0
+               ORDER BY g.date_depicted NULLS LAST, g.created_at""",
+            (entity_id,)
+        ).fetchall()
+
+        all_rows = sorted(
+            rows_to_list(doc_rows) + rows_to_list(grp_rows),
+            key=lambda r: r.get("date_depicted") or r.get("date_range_start") or ""
+        )
+        rows = all_rows[offset: offset + per_page]
+
     return jsonify({
-        "documents": rows_to_list(rows),
+        "documents": rows,
         "total":     total,
         "page":      page,
         "per_page":  per_page,
