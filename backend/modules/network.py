@@ -40,110 +40,105 @@ def get_network(
         # ── 1. Fetch relevant document IDs ────────────────────────────────────
         doc_ids = _get_relevant_doc_ids(conn, entity_id, tag_id, doc_id, date_from, date_to, max_nodes)
 
-        if not doc_ids:
-            return {"nodes": [], "edges": [], "stats": {"total_nodes": 0, "total_edges": 0}}
-
-        placeholders = ",".join("?" * len(doc_ids))
-
-        # ── 2. Document nodes ─────────────────────────────────────────────────
-        doc_rows = conn.execute(
-            f"""SELECT id, title, filename, date_depicted, date_range_start,
-                       is_key_evidence, medium
-                FROM documents WHERE id IN ({placeholders})""",
-            doc_ids,
-        ).fetchall()
-
-        nodes = {}
-        for d in doc_rows:
-            nodes[f"doc_{d['id']}"] = {
-                "id":              f"doc_{d['id']}",
-                "db_id":           d["id"],
-                "type":            "document",
-                "label":           d["title"] or d["filename"],
-                "date":            d["date_depicted"] or d["date_range_start"],
-                "is_key_evidence": bool(d["is_key_evidence"]),
-                "medium":          d["medium"],
-            }
-
-        # ── 3. Entity nodes + document-entity edges ───────────────────────────
-        de_rows = conn.execute(
-            f"""SELECT de.document_id, de.entity_id, de.role,
-                       e.name, e.type
-                FROM document_entities de
-                JOIN entities e ON e.id = de.entity_id
-                WHERE de.document_id IN ({placeholders})""",
-            doc_ids,
-        ).fetchall()
-
-        edges = {}
+        nodes: dict = {}
+        edges: dict = {}
         entity_doc_count: dict[int, int] = {}
 
-        for de in de_rows:
-            eid = de["entity_id"]
-            node_key = f"ent_{eid}"
+        if doc_ids:
+            placeholders = ",".join("?" * len(doc_ids))
 
-            # Track doc count for entity
-            entity_doc_count[eid] = entity_doc_count.get(eid, 0) + 1
+            # ── 2. Document nodes ─────────────────────────────────────────────
+            doc_rows = conn.execute(
+                f"""SELECT id, title, filename, date_depicted, date_range_start,
+                           is_key_evidence, medium
+                    FROM documents WHERE id IN ({placeholders})""",
+                doc_ids,
+            ).fetchall()
 
-            if node_key not in nodes:
-                nodes[node_key] = {
-                    "id":        node_key,
-                    "db_id":     eid,
-                    "type":      de["type"],
-                    "label":     de["name"],
-                    "doc_count": 0,
+            for d in doc_rows:
+                nodes[f"doc_{d['id']}"] = {
+                    "id":              f"doc_{d['id']}",
+                    "db_id":           d["id"],
+                    "type":            "document",
+                    "label":           d["title"] or d["filename"],
+                    "date":            d["date_depicted"] or d["date_range_start"],
+                    "is_key_evidence": bool(d["is_key_evidence"]),
+                    "medium":          d["medium"],
                 }
-            nodes[node_key]["doc_count"] = entity_doc_count[eid]
 
-            # Document → Entity edge
-            edge_key = f"doc_{de['document_id']}__ent_{eid}"
-            if edge_key not in edges:
-                edges[edge_key] = {
-                    "source":            f"doc_{de['document_id']}",
-                    "target":            node_key,
-                    "weight":            0,
-                    "relationship_type": de["role"] or "mentions",
+            # ── 3. Entity nodes + document-entity edges ───────────────────────
+            de_rows = conn.execute(
+                f"""SELECT de.document_id, de.entity_id, de.role,
+                           e.name, e.type
+                    FROM document_entities de
+                    JOIN entities e ON e.id = de.entity_id
+                    WHERE de.document_id IN ({placeholders})""",
+                doc_ids,
+            ).fetchall()
+
+            for de in de_rows:
+                eid = de["entity_id"]
+                node_key = f"ent_{eid}"
+
+                entity_doc_count[eid] = entity_doc_count.get(eid, 0) + 1
+
+                if node_key not in nodes:
+                    nodes[node_key] = {
+                        "id":        node_key,
+                        "db_id":     eid,
+                        "type":      de["type"],
+                        "label":     de["name"],
+                        "doc_count": 0,
+                    }
+                nodes[node_key]["doc_count"] = entity_doc_count[eid]
+
+                edge_key = f"doc_{de['document_id']}__ent_{eid}"
+                if edge_key not in edges:
+                    edges[edge_key] = {
+                        "source":            f"doc_{de['document_id']}",
+                        "target":            node_key,
+                        "weight":            0,
+                        "relationship_type": de["role"] or "mentions",
+                    }
+                edges[edge_key]["weight"] += 1
+
+            # ── 4. Entity co-occurrence edges ─────────────────────────────────
+            cooc_sql = f"""
+                SELECT a.entity_id as ea, b.entity_id as eb, COUNT(*) as cnt
+                FROM document_entities a
+                JOIN document_entities b
+                  ON a.document_id = b.document_id AND a.entity_id < b.entity_id
+                WHERE a.document_id IN ({placeholders})
+                GROUP BY a.entity_id, b.entity_id
+                HAVING cnt >= 1
+            """
+            for row in conn.execute(cooc_sql, doc_ids).fetchall():
+                ea, eb = row["ea"], row["eb"]
+                k = f"ent_{ea}__ent_{eb}"
+                edges[k] = {
+                    "source":            f"ent_{ea}",
+                    "target":            f"ent_{eb}",
+                    "weight":            row["cnt"],
+                    "relationship_type": "co-occurrence",
                 }
-            edges[edge_key]["weight"] += 1
 
-        # ── 4. Entity co-occurrence edges ─────────────────────────────────────
-        # Two entities are connected if they appear in the same document
-        cooc_sql = f"""
-            SELECT a.entity_id as ea, b.entity_id as eb, COUNT(*) as cnt
-            FROM document_entities a
-            JOIN document_entities b
-              ON a.document_id = b.document_id AND a.entity_id < b.entity_id
-            WHERE a.document_id IN ({placeholders})
-            GROUP BY a.entity_id, b.entity_id
-            HAVING cnt >= 1
-        """
-        for row in conn.execute(cooc_sql, doc_ids).fetchall():
-            ea, eb = row["ea"], row["eb"]
-            k = f"ent_{ea}__ent_{eb}"
-            edges[k] = {
-                "source":            f"ent_{ea}",
-                "target":            f"ent_{eb}",
-                "weight":            row["cnt"],
-                "relationship_type": "co-occurrence",
-            }
+            # ── 5. Document link edges ────────────────────────────────────────
+            link_rows = conn.execute(
+                f"""SELECT dl.source_id, dl.target_id, dl.relationship_type
+                    FROM document_links dl
+                    WHERE dl.source_id IN ({placeholders})
+                       OR dl.target_id IN ({placeholders})""",
+                doc_ids + doc_ids,
+            ).fetchall()
 
-        # ── 5. Document link edges ────────────────────────────────────────────
-        link_rows = conn.execute(
-            f"""SELECT dl.source_id, dl.target_id, dl.relationship_type
-                FROM document_links dl
-                WHERE dl.source_id IN ({placeholders})
-                   OR dl.target_id IN ({placeholders})""",
-            doc_ids + doc_ids,
-        ).fetchall()
-
-        for link in link_rows:
-            k = f"doc_{link['source_id']}__doc_{link['target_id']}"
-            edges[k] = {
-                "source":            f"doc_{link['source_id']}",
-                "target":            f"doc_{link['target_id']}",
-                "weight":            2,
-                "relationship_type": link["relationship_type"] or "linked",
-            }
+            for link in link_rows:
+                k = f"doc_{link['source_id']}__doc_{link['target_id']}"
+                edges[k] = {
+                    "source":            f"doc_{link['source_id']}",
+                    "target":            f"doc_{link['target_id']}",
+                    "weight":            2,
+                    "relationship_type": link["relationship_type"] or "linked",
+                }
 
         # ── 6. Group nodes + group-entity edges ───────────────────────────────
         group_rows = conn.execute(

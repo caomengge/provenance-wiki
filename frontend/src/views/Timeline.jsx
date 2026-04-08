@@ -40,12 +40,12 @@ function TimelineEvent({ event, onDocClick }) {
 
       {/* Content — <a> when linked so right-click "Open in New Tab" works */}
       <a
-        href={event.doc_id ? `/documents/${event.doc_id}` : undefined}
+        href={event.doc_id ? (event.group_id ? `/groups/${event.group_id}` : `/documents/${event.doc_id}`) : undefined}
         onClick={(e) => {
           if (!event.doc_id) return
           if (e.ctrlKey || e.metaKey || e.shiftKey) return  // browser opens new tab
           e.preventDefault()
-          onDocClick(event.doc_id)
+          onDocClick(event.doc_id, event.group_id)
         }}
         style={{
           flex:           1,
@@ -240,7 +240,7 @@ export default function Timeline() {
                   <TimelineEvent
                     key={`${e.doc_id}-${e.type}-${i}`}
                     event={e}
-                    onDocClick={(id) => navigate(`/documents/${id}`)}
+                    onDocClick={(id, groupId) => navigate(groupId ? `/groups/${groupId}` : `/documents/${id}`)}
                   />
                 ))}
               </div>
@@ -256,7 +256,7 @@ export default function Timeline() {
                   <TimelineEvent
                     key={`undated-${e.doc_id}-${i}`}
                     event={e}
-                    onDocClick={(id) => navigate(`/documents/${id}`)}
+                    onDocClick={(id, groupId) => navigate(groupId ? `/groups/${groupId}` : `/documents/${id}`)}
                   />
                 ))}
               </div>
