@@ -27,9 +27,10 @@ VISION_MODEL     = "claude-sonnet-4-6"
 REASONING_MODEL  = "claude-sonnet-4-6"
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
-INGEST_BATCH_SIZE  = 10           # photos processed per Claude API call batch
-INGEST_MAX_TOKENS  = 4096         # max output tokens for extraction prompt
-SUPPORTED_EXTS     = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
+INGEST_BATCH_SIZE    = 10         # photos processed per Claude API call batch
+INGEST_MAX_TOKENS    = 4096       # max output tokens for extraction prompt
+SUPPORTED_EXTS       = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
+MULTIPAGE_MAX_PAGES  = 50         # max pages per document group
 
 # ── API ───────────────────────────────────────────────────────────────────────
 DEFAULT_PAGE_SIZE = 50

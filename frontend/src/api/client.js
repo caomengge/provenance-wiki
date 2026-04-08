@@ -44,6 +44,28 @@ const api = {
   wipeDocument: (id) =>
     request('POST', `/api/documents/${id}/wipe`),
 
+  // ── Groups ────────────────────────────────────────────────────────────────
+  createGroup: (docIds, title) =>
+    request('POST', '/api/groups', { doc_ids: docIds, title: title || undefined }),
+
+  getGroups: (params = {}) =>
+    request('GET', '/api/groups?' + new URLSearchParams(params)),
+
+  getGroup: (id) =>
+    request('GET', `/api/groups/${id}`),
+
+  updateGroup: (id, data) =>
+    request('PATCH', `/api/groups/${id}`, data),
+
+  deleteGroup: (id) =>
+    request('DELETE', `/api/groups/${id}`),
+
+  reorderGroupPages: (groupId, pageOrder) =>
+    request('PATCH', `/api/groups/${groupId}/pages`, { page_order: pageOrder }),
+
+  reExtractGroup: (groupId) =>
+    request('POST', `/api/groups/${groupId}/re-extract`),
+
   createLink: (docId, targetId, type, notes) =>
     request('POST', `/api/documents/${docId}/links`, {
       target_id: targetId, relationship_type: type, notes,
@@ -96,6 +118,12 @@ const api = {
 
   removeDocTag: (docId, tagId) =>
     request('DELETE', `/api/documents/${docId}/tags/${tagId}`),
+
+  addGroupTag: (groupId, tagId) =>
+    request('POST', `/api/groups/${groupId}/tags`, { tag_id: tagId }),
+
+  removeGroupTag: (groupId, tagId) =>
+    request('DELETE', `/api/groups/${groupId}/tags/${tagId}`),
 
   // ── Ingest ───────────────────────────────────────────────────────────────
   startIngest: (sourceArchive) =>

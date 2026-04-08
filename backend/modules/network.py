@@ -145,6 +145,66 @@ def get_network(
                 "relationship_type": link["relationship_type"] or "linked",
             }
 
+        # ── 6. Group nodes + group-entity edges ───────────────────────────────
+        group_rows = conn.execute(
+            """SELECT g.id, g.title, g.date_depicted, g.is_key_evidence,
+                      COUNT(d.id) as page_count
+               FROM document_groups g
+               LEFT JOIN documents d ON d.group_id = g.id
+               WHERE g.is_trashed = 0
+               GROUP BY g.id
+               LIMIT ?""",
+            (max_nodes,),
+        ).fetchall()
+
+        group_ids = [g["id"] for g in group_rows]
+        for g in group_rows:
+            nodes[f"grp_{g['id']}"] = {
+                "id":              f"grp_{g['id']}",
+                "db_id":           g["id"],
+                "type":            "group",
+                "label":           g["title"] or f"Group #{g['id']}",
+                "date":            g["date_depicted"],
+                "is_key_evidence": bool(g["is_key_evidence"]),
+                "page_count":      g["page_count"],
+            }
+
+        if group_ids:
+            gplaceholders = ",".join("?" * len(group_ids))
+            ge_rows = conn.execute(
+                f"""SELECT ge.group_id, ge.entity_id, ge.role,
+                           e.name, e.type
+                    FROM group_entities ge
+                    JOIN entities e ON e.id = ge.entity_id
+                    WHERE ge.group_id IN ({gplaceholders})""",
+                group_ids,
+            ).fetchall()
+
+            for ge in ge_rows:
+                eid = ge["entity_id"]
+                node_key = f"ent_{eid}"
+                entity_doc_count[eid] = entity_doc_count.get(eid, 0) + 1
+
+                if node_key not in nodes:
+                    nodes[node_key] = {
+                        "id":        node_key,
+                        "db_id":     eid,
+                        "type":      ge["type"],
+                        "label":     ge["name"],
+                        "doc_count": 0,
+                    }
+                nodes[node_key]["doc_count"] = entity_doc_count[eid]
+
+                edge_key = f"grp_{ge['group_id']}__ent_{eid}"
+                if edge_key not in edges:
+                    edges[edge_key] = {
+                        "source":            f"grp_{ge['group_id']}",
+                        "target":            node_key,
+                        "weight":            0,
+                        "relationship_type": ge["role"] or "mentions",
+                    }
+                edges[edge_key]["weight"] += 1
+
     node_list = list(nodes.values())
     edge_list  = list(edges.values())
 
@@ -161,7 +221,7 @@ def get_network(
 def _get_relevant_doc_ids(conn, entity_id, tag_id, doc_id, date_from, date_to, max_nodes):
     """Return a list of document IDs for the network, applying filters."""
     sql = "SELECT d.id FROM documents d"
-    joins, wheres, params = [], ["d.is_trashed = 0"], []
+    joins, wheres, params = [], ["d.is_trashed = 0", "d.group_id IS NULL"], []
 
     if entity_id:
         joins.append("JOIN document_entities de ON de.document_id = d.id AND de.entity_id = ?")

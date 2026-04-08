@@ -42,7 +42,7 @@ def get_timeline(
         dated_events   = []
         undated_events = []
 
-        # ── Transaction events ────────────────────────────────────────────────
+        # ── Standalone document transaction events ────────────────────────────
         txn_sql, txn_params = _build_txn_query(entity_id, tag_id, date_from, date_to, doc_ids)
         for row in conn.execute(txn_sql, txn_params).fetchall():
             t = dict(row)
@@ -62,7 +62,28 @@ def get_timeline(
                 "label":        _txn_label(t),
             })
 
-        # ── Document date events ──────────────────────────────────────────────
+        # ── Group transaction events ──────────────────────────────────────────
+        grp_txn_sql, grp_txn_params = _build_group_txn_query(date_from, date_to)
+        for row in conn.execute(grp_txn_sql, grp_txn_params).fetchall():
+            t = dict(row)
+            dated_events.append({
+                "type":         "transaction",
+                "date":         t["date"],
+                "group_id":     t["group_id"],
+                "doc_id":       f"grp_{t['group_id']}",
+                "doc_title":    t["group_title"],
+                "seller":       t.get("seller"),
+                "buyer":        t.get("buyer"),
+                "price":        t.get("price"),
+                "currency":     t.get("currency"),
+                "auction_house":t.get("auction_house"),
+                "lot_number":   t.get("lot_number"),
+                "location":     t.get("location"),
+                "notes":        t.get("notes"),
+                "label":        _txn_label(t),
+            })
+
+        # ── Standalone document date events ───────────────────────────────────
         doc_sql, doc_params = _build_doc_query(entity_id, tag_id, date_from, date_to, doc_ids)
         for row in conn.execute(doc_sql, doc_params).fetchall():
             d = dict(row)
@@ -82,7 +103,31 @@ def get_timeline(
 
             if eff_date:
                 event["date"] = eff_date
-                # Avoid duplicating a doc if its date was already captured via a transaction
+                dated_events.append(event)
+            else:
+                undated_events.append(event)
+
+        # ── Group date events ─────────────────────────────────────────────────
+        grp_doc_sql, grp_doc_params = _build_group_doc_query(date_from, date_to)
+        for row in conn.execute(grp_doc_sql, grp_doc_params).fetchall():
+            g = dict(row)
+            eff_date = g.get("date_depicted") or g.get("date_range_start")
+            entity_names = [e.strip() for e in (g.get("entity_names") or "").split(",") if e.strip()]
+
+            event = {
+                "type":          "document",
+                "group_id":      g["id"],
+                "doc_id":        f"grp_{g['id']}",
+                "doc_title":     g.get("title"),
+                "entity_names":  entity_names,
+                "location":      g.get("location"),
+                "medium":        g.get("medium"),
+                "is_key_evidence": bool(g.get("is_key_evidence")),
+                "label":         g.get("title") or f"Group #{g['id']}",
+            }
+
+            if eff_date:
+                event["date"] = eff_date
                 dated_events.append(event)
             else:
                 undated_events.append(event)
@@ -116,6 +161,7 @@ def _build_txn_query(entity_id, tag_id, date_from, date_to, doc_ids):
         params.append(tag_id)
 
     wheres.append("d.is_trashed = 0")
+    wheres.append("d.group_id IS NULL")
     wheres.append("t.date IS NOT NULL")
 
     if date_from:
@@ -155,6 +201,7 @@ def _build_doc_query(entity_id, tag_id, date_from, date_to, doc_ids):
         params.insert(0, tag_id)  # join params come before where params
 
     wheres.append("d.is_trashed = 0")
+    wheres.append("d.group_id IS NULL")
 
     eff_date_expr = "COALESCE(d.date_depicted, d.date_range_start)"
     if date_from:
@@ -173,6 +220,47 @@ def _build_doc_query(entity_id, tag_id, date_from, date_to, doc_ids):
         sql += " WHERE " + " AND ".join(wheres)
     sql += " GROUP BY d.id ORDER BY " + eff_date_expr
 
+    return sql, params
+
+
+def _build_group_txn_query(date_from, date_to):
+    sql = """
+        SELECT gt.*, g.title as group_title
+        FROM group_transactions gt
+        JOIN document_groups g ON g.id = gt.group_id
+    """
+    wheres = ["g.is_trashed = 0", "gt.date IS NOT NULL"]
+    params = []
+    if date_from:
+        wheres.append("gt.date >= ?")
+        params.append(date_from)
+    if date_to:
+        wheres.append("gt.date <= ?")
+        params.append(date_to)
+    sql += " WHERE " + " AND ".join(wheres) + " ORDER BY gt.date"
+    return sql, params
+
+
+def _build_group_doc_query(date_from, date_to):
+    sql = """
+        SELECT g.id, g.title, g.date_depicted, g.date_range_start,
+               g.location, g.medium, g.is_key_evidence,
+               GROUP_CONCAT(e.name) as entity_names
+        FROM document_groups g
+        LEFT JOIN group_entities ge ON ge.group_id = g.id
+        LEFT JOIN entities e ON e.id = ge.entity_id
+    """
+    wheres = ["g.is_trashed = 0"]
+    params = []
+    eff_date_expr = "COALESCE(g.date_depicted, g.date_range_start)"
+    if date_from:
+        wheres.append(f"{eff_date_expr} >= ?")
+        params.append(date_from)
+    if date_to:
+        wheres.append(f"{eff_date_expr} <= ?")
+        params.append(date_to)
+    sql += " WHERE " + " AND ".join(wheres)
+    sql += " GROUP BY g.id ORDER BY " + eff_date_expr
     return sql, params
 
 

@@ -43,9 +43,18 @@ export default function Gallery({ onStatsUpdate }) {
       if (filterTag)     params.tag_id         = filterTag
       if (filterArchive) params.source_archive = filterArchive
       if (filterEntity)  params.entity_id      = filterEntity
-      const res = await api.getDocuments(params)
-      setDocs(res.documents || [])
-      setTotal(res.total || 0)
+
+      const [docsRes, groupsRes] = await Promise.all([
+        api.getDocuments(params),
+        api.getGroups({ page, per_page: perPage === 'all' ? 9999 : perPage }),
+      ])
+
+      const groups = (groupsRes.groups || []).map(g => ({ ...g, _isGroup: true }))
+      const combined = [...groups, ...(docsRes.documents || [])]
+      combined.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+      setDocs(combined)
+      setTotal((docsRes.total || 0) + (groupsRes.total || 0))
     } catch (err) {
       console.error(err)
     } finally {

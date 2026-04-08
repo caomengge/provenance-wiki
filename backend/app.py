@@ -53,9 +53,10 @@ def create_app() -> Flask:
     from api.network_routes  import bp as network_bp
     from api.qa_routes       import bp as qa_bp
     from api.export_routes   import bp as export_bp
+    from api.groups          import bp as groups_bp
 
     for bp in [docs_bp, entities_bp, search_bp, ingest_bp,
-               timeline_bp, network_bp, qa_bp, export_bp]:
+               timeline_bp, network_bp, qa_bp, export_bp, groups_bp]:
         app.register_blueprint(bp)
 
     # ── Stats endpoint ────────────────────────────────────────────────────────
@@ -63,13 +64,15 @@ def create_app() -> Flask:
     def stats():
         from modules.db import get_db
         with get_db() as conn:
-            doc_count    = conn.execute("SELECT COUNT(*) as c FROM documents").fetchone()["c"]
+            doc_count    = conn.execute("SELECT COUNT(*) as c FROM documents WHERE group_id IS NULL").fetchone()["c"]
+            group_count  = conn.execute("SELECT COUNT(*) as c FROM document_groups").fetchone()["c"]
             entity_count = conn.execute("SELECT COUNT(*) as c FROM entities").fetchone()["c"]
             txn_count    = conn.execute("SELECT COUNT(*) as c FROM transactions").fetchone()["c"]
             tag_count    = conn.execute("SELECT COUNT(*) as c FROM tags").fetchone()["c"]
-            key_count    = conn.execute("SELECT COUNT(*) as c FROM documents WHERE is_key_evidence=1").fetchone()["c"]
+            key_count    = conn.execute("SELECT COUNT(*) as c FROM documents WHERE is_key_evidence=1 AND group_id IS NULL").fetchone()["c"]
         return jsonify({
             "documents":  doc_count,
+            "groups":     group_count,
             "entities":   entity_count,
             "transactions": txn_count,
             "tags":       tag_count,

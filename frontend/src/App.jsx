@@ -9,6 +9,7 @@ import Search from './views/Search'
 import QA from './views/QA'
 import Trash from './views/Trash'
 import Entities from './views/Entities'
+import GroupDetail from './views/GroupDetail'
 import QAPanel from './components/QAPanel'
 import api from './api/client'
 
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/qa"          element={<QA />} />
             <Route path="/entities"    element={<Entities />} />
             <Route path="/trash"       element={<Trash />} />
+            <Route path="/groups/:id"  element={<GroupDetail />} />
           </Routes>
         </main>
 

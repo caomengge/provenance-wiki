@@ -73,6 +73,55 @@ Critical rules:
 7. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
 
 
+# ── Multi-page extraction prompt ─────────────────────────────────────────────
+
+MULTI_PAGE_EXTRACTION_PROMPT = """You are an expert museum archivist and provenance researcher. You are examining a {n}-page document — each image is one page in sequence. Treat all pages as a single unified document and extract combined provenance information.
+
+Return ONLY a valid JSON object with this exact structure (no other text before or after):
+{{
+  "title": "a short descriptive title for this document",
+  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if known, otherwise null",
+  "date_range_start": "earliest date this document could relate to, YYYY-MM-DD or null",
+  "date_range_end": "latest date this document could relate to, YYYY-MM-DD or null",
+  "location": "primary location mentioned or associated with this document",
+  "medium": "type of document (e.g., 'letter', 'auction catalog', 'receipt')",
+  "dimensions": "physical dimensions if visible or mentioned, otherwise null",
+  "description": "detailed description (3-5 sentences) explaining what this document shows across all pages and its provenance significance",
+  "language": "primary language(s) of the document text",
+  "transcription": "faithful word-for-word transcription of ALL visible text across all pages in sequence, preserving original spelling, punctuation, and line breaks. Mark page breaks with [Page N]. Non-English text must be reproduced exactly — do not translate. Use [illegible] for unreadable words.",
+  "entities": [
+    {{
+      "name": "full name of person, object, or institution EXACTLY as written",
+      "type": "person OR object OR institution",
+      "role": "role in this document",
+      "context": "one sentence explaining how this entity relates to the document"
+    }}
+  ],
+  "transactions": [
+    {{
+      "seller": "seller name or null",
+      "buyer": "buyer name or null",
+      "date": "transaction date YYYY-MM-DD or null",
+      "price": "numeric price as a number or null",
+      "currency": "3-letter currency code or null",
+      "auction_house": "auction house name or null",
+      "lot_number": "lot number as string or null",
+      "location": "city/country or null",
+      "notes": "any additional details or null"
+    }}
+  ],
+  "tags": ["relevant", "keyword", "tags"],
+  "key_evidence": false
+}}
+
+Critical rules:
+1. Preserve ALL non-English text EXACTLY as written — do not translate
+2. Extract EVERY person, institution, and artwork mentioned across all pages
+3. The transcription must cover all pages in order, separated by [Page N] markers
+4. Set key_evidence to true if this document directly proves ownership transfer
+5. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
+
+
 # ── Main extraction function ──────────────────────────────────────────────────
 
 def extract_from_image(image_path: Path, api_key: str) -> dict:
@@ -155,6 +204,68 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
         "transactions":      [],
         "tags":              ["extraction-failed"],
         "key_evidence":      False,
+    }
+
+
+def extract_from_images(image_paths: list[Path], api_key: str) -> dict:
+    """
+    Send multiple page images to Claude Vision in a single API call and return
+    combined provenance extraction.  image_paths must be in desired page order.
+    """
+    client = anthropic.Anthropic(api_key=api_key)
+
+    content = []
+    for path in image_paths:
+        raw = path.read_bytes()
+        image_bytes = _prepare_image(path, raw)
+        media_type  = "image/jpeg" if image_bytes is not raw else _get_media_type(path)
+        content.append({
+            "type": "image",
+            "source": {
+                "type":       "base64",
+                "media_type": media_type,
+                "data":       base64.standard_b64encode(image_bytes).decode("utf-8"),
+            },
+        })
+
+    content.append({
+        "type": "text",
+        "text": MULTI_PAGE_EXTRACTION_PROMPT.format(n=len(image_paths)),
+    })
+
+    last_error = None
+    for attempt in range(3):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=8192,
+                messages=[{"role": "user", "content": content}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("```", 2)[1]
+                if text.startswith("json"):
+                    text = text[4:]
+                text = text.rsplit("```", 1)[0].strip()
+            return json.loads(text)
+
+        except json.JSONDecodeError as exc:
+            logger.warning("Attempt %d: JSON parse error (multi-page): %s", attempt + 1, exc)
+            last_error = exc
+            time.sleep(2 ** attempt)
+        except anthropic.APIError as exc:
+            logger.warning("Attempt %d: API error (multi-page): %s", attempt + 1, exc)
+            last_error = exc
+            time.sleep(2 ** attempt)
+
+    logger.error("Multi-page extraction failed after 3 attempts: %s", last_error)
+    return {
+        "title":       f"Multi-page document ({len(image_paths)} pages)",
+        "description": f"Extraction failed: {last_error}",
+        "entities":    [],
+        "transactions":[],
+        "tags":        ["extraction-failed"],
+        "key_evidence": False,
     }
 
 

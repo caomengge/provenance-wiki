@@ -15,6 +15,7 @@
  */
 
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 
 const TAG_COLORS = [
@@ -38,10 +39,15 @@ export default function BatchEditBar({
   archives    = [],
   onDone,
 }) {
-  const count = selectedIds.size
+  const count    = selectedIds.size
+  const navigate = useNavigate()
 
-  // Which panel is open: null | 'source' | 'tag'
+  // Which panel is open: null | 'source' | 'tag' | 'group'
   const [panel, setPanel] = useState(null)
+
+  // Group panel state
+  const [groupTitle,    setGroupTitle]    = useState('')
+  const [groupCreating, setGroupCreating] = useState(false)
 
   // Source panel state
   const [sourceValue,    setSourceValue]    = useState('')
@@ -72,6 +78,7 @@ export default function BatchEditBar({
   const resetPanelState = (p) => {
     if (p === 'source') { setSourceValue(''); setSourceApplying(false) }
     if (p === 'tag')    { setNewTagName(''); setTagApplying(null) }
+    if (p === 'group')  { setGroupTitle(''); setGroupCreating(false) }
   }
 
   // ── Source batch-apply ─────────────────────────────────────────────────────
@@ -125,6 +132,20 @@ export default function BatchEditBar({
     }
   }
 
+  // ── Group create ───────────────────────────────────────────────────────────
+
+  const createGroup = async () => {
+    if (groupCreating) return
+    setGroupCreating(true)
+    try {
+      const result = await api.createGroup([...selectedIds], groupTitle.trim() || undefined)
+      navigate(`/groups/${result.group_id}`)
+    } catch (err) {
+      alert(err.message)
+      setGroupCreating(false)
+    }
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
@@ -158,6 +179,16 @@ export default function BatchEditBar({
         >
           {exporting ? '…' : '↓ Export PDF'}
         </button>
+
+        {count >= 2 && (
+          <button
+            className={`btn ${panel === 'group' ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => togglePanel('group')}
+            style={{ fontSize: '0.82rem' }}
+          >
+            ⊞ Group Pages
+          </button>
+        )}
 
         <button className="btn btn-ghost" onClick={onClear}>
           Cancel
@@ -284,6 +315,39 @@ export default function BatchEditBar({
               {tagApplying === 'new' ? '…' : '+ Create & Add'}
             </button>
           </div>
+        </div>
+      )}
+      {/* ── Group panel ─────────────────────────────────────────────────── */}
+      {panel === 'group' && (
+        <div style={PANEL_STYLE}>
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
+            Group <strong>{count}</strong> pages into one multi-page document.
+            Claude will read all pages together in a single API call.
+          </div>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              value={groupTitle}
+              onChange={e => setGroupTitle(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') createGroup() }}
+              placeholder="Title (optional — Claude will suggest one)…"
+              autoFocus
+              disabled={groupCreating}
+              style={{ flex: 1, minWidth: '220px', fontSize: '0.88rem' }}
+            />
+            <button
+              className="btn btn-primary"
+              onClick={createGroup}
+              disabled={groupCreating}
+              style={{ fontSize: '0.82rem', flexShrink: 0 }}
+            >
+              {groupCreating ? 'Grouping & extracting…' : `Group ${count} Pages`}
+            </button>
+          </div>
+          {groupCreating && (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.4rem' }}>
+              Sending all pages to Claude — this may take 10–30 seconds…
+            </div>
+          )}
         </div>
       )}
     </div>

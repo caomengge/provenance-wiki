@@ -1,0 +1,448 @@
+"""
+groups.py – Flask Blueprint for multi-page document groups.
+
+Routes:
+  POST   /api/groups                  – create group from selected doc IDs + extract
+  GET    /api/groups                  – paginated list of groups
+  GET    /api/groups/:id              – full group detail + pages
+  PATCH  /api/groups/:id              – update editable fields
+  DELETE /api/groups/:id              – delete group (pages revert to standalone)
+  PATCH  /api/groups/:id/pages        – reorder pages
+  POST   /api/groups/:id/re-extract   – re-run extraction with current page order
+"""
+
+import json
+import logging
+
+from flask import Blueprint, abort, jsonify, request
+
+bp = Blueprint("groups", __name__)
+logger = logging.getLogger(__name__)
+
+
+def _get_deps():
+    from config import PHOTOS_DIR, ANTHROPIC_API_KEY, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MULTIPAGE_MAX_PAGES
+    from modules.db import get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag
+    return PHOTOS_DIR, ANTHROPIC_API_KEY, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, MULTIPAGE_MAX_PAGES, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag
+
+
+# ── Create group ──────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups", methods=["POST"])
+def create_group():
+    """
+    Body: { "doc_ids": [1, 2, 3], "title": "optional" }
+    Validates docs, extracts all pages in one Claude call, creates group record.
+    """
+    PHOTOS_DIR, API_KEY, _, _, MULTIPAGE_MAX_PAGES, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag = _get_deps()
+    from modules.extractor import extract_from_images, generate_text_embedding
+
+    data    = request.get_json(silent=True) or {}
+    doc_ids = data.get("doc_ids", [])
+    title   = data.get("title", "").strip() or None
+
+    if not doc_ids or len(doc_ids) < 2:
+        return jsonify({"error": "At least 2 documents required to create a group"}), 400
+    if len(doc_ids) > MULTIPAGE_MAX_PAGES:
+        return jsonify({"error": f"Cannot group more than {MULTIPAGE_MAX_PAGES} pages at once"}), 400
+
+    with get_db() as conn:
+        # Validate all docs exist and are not already grouped
+        rows = conn.execute(
+            f"SELECT id, filename, group_id FROM documents WHERE id IN ({','.join('?' * len(doc_ids))})",
+            doc_ids
+        ).fetchall()
+
+        if len(rows) != len(doc_ids):
+            return jsonify({"error": "One or more document IDs not found"}), 404
+
+        already_grouped = [r["id"] for r in rows if r["group_id"] is not None]
+        if already_grouped:
+            return jsonify({"error": f"Documents {already_grouped} already belong to a group"}), 409
+
+        # Sort filenames lexicographically → natural page order
+        pages_sorted = sorted(rows, key=lambda r: r["filename"])
+
+    image_paths = [PHOTOS_DIR / r["filename"] for r in pages_sorted]
+    missing = [str(p) for p in image_paths if not p.exists()]
+    if missing:
+        return jsonify({"error": f"Image files not found: {missing}"}), 404
+
+    # Extract from all pages in one API call
+    extracted = extract_from_images(image_paths, API_KEY)
+
+    embed_text = " ".join(filter(None, [
+        extracted.get("title", ""),
+        extracted.get("description", ""),
+        " ".join(extracted.get("tags", [])),
+    ]))
+    from modules.extractor import generate_text_embedding
+    embedding = generate_text_embedding(embed_text, API_KEY)
+
+    with get_db() as conn:
+        # Insert group record
+        cur = conn.execute(
+            """INSERT INTO document_groups
+               (title, date_depicted, date_range_start, date_range_end,
+                location, medium, dimensions, description, language,
+                transcription, raw_claude_response, is_key_evidence,
+                embedding_json, source_archive)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                title or extracted.get("title"),
+                extracted.get("date_depicted"),
+                extracted.get("date_range_start"),
+                extracted.get("date_range_end"),
+                extracted.get("location"),
+                extracted.get("medium"),
+                extracted.get("dimensions"),
+                extracted.get("description"),
+                extracted.get("language"),
+                extracted.get("transcription"),
+                json.dumps(extracted),
+                1 if extracted.get("key_evidence") else 0,
+                json.dumps(embedding) if embedding else None,
+                extracted.get("source_archive"),
+            )
+        )
+        group_id = cur.lastrowid
+
+        # Assign pages
+        for page_number, row in enumerate(pages_sorted, start=1):
+            conn.execute(
+                "UPDATE documents SET group_id=?, page_number=? WHERE id=?",
+                (group_id, page_number, row["id"])
+            )
+
+        # Insert entities
+        for ent in (extracted.get("entities") or []):
+            if not ent.get("name"):
+                continue
+            entity_id = upsert_entity(conn, ent["name"], ent.get("type", "unknown"))
+            if entity_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO group_entities (group_id, entity_id, role, context) VALUES (?,?,?,?)",
+                    (group_id, entity_id, ent.get("role"), ent.get("context"))
+                )
+
+        # Insert transactions
+        for txn in (extracted.get("transactions") or []):
+            conn.execute(
+                """INSERT INTO group_transactions
+                   (group_id, seller, buyer, date, price, currency,
+                    auction_house, lot_number, location, notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    group_id,
+                    txn.get("seller"), txn.get("buyer"), txn.get("date"),
+                    _to_float(txn.get("price")), txn.get("currency"),
+                    txn.get("auction_house"),
+                    str(txn.get("lot_number")) if txn.get("lot_number") else None,
+                    txn.get("location"), txn.get("notes"),
+                )
+            )
+
+        # Insert tags
+        for tag_name in (extracted.get("tags") or []):
+            if not tag_name:
+                continue
+            tag_id = get_or_create_tag(conn, str(tag_name).strip())
+            if tag_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO group_tags (group_id, tag_id) VALUES (?,?)",
+                    (group_id, tag_id)
+                )
+
+    return jsonify({"group_id": group_id, "title": title or extracted.get("title")}), 201
+
+
+# ── List groups ───────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups", methods=["GET"])
+def list_groups():
+    _, _, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, _, get_db, rows_to_list, _, _, _ = _get_deps()
+
+    page     = max(1, int(request.args.get("page", 1)))
+    per_page = min(int(request.args.get("per_page", DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
+    offset   = (page - 1) * per_page
+
+    with get_db() as conn:
+        total = conn.execute(
+            "SELECT COUNT(*) as c FROM document_groups WHERE is_trashed=0"
+        ).fetchone()["c"]
+
+        rows = conn.execute(
+            """SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
+                      g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
+                      COUNT(d.id) as page_count,
+                      MIN(d.id) as first_page_id
+               FROM document_groups g
+               LEFT JOIN documents d ON d.group_id = g.id
+               WHERE g.is_trashed = 0
+               GROUP BY g.id
+               ORDER BY g.created_at DESC
+               LIMIT ? OFFSET ?""",
+            (per_page, offset)
+        ).fetchall()
+
+    return jsonify({
+        "groups":   rows_to_list(rows),
+        "total":    total,
+        "page":     page,
+        "per_page": per_page,
+    })
+
+
+# ── Group detail ──────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>", methods=["GET"])
+def get_group(group_id):
+    _, _, _, _, _, get_db, rows_to_list, row_to_dict, _, _ = _get_deps()
+
+    with get_db() as conn:
+        group = conn.execute(
+            "SELECT * FROM document_groups WHERE id=?", (group_id,)
+        ).fetchone()
+        if not group:
+            abort(404)
+
+        group = row_to_dict(group)
+        group.pop("embedding_json", None)
+
+        group["pages"] = rows_to_list(conn.execute(
+            """SELECT id, filename, page_number, title, date_depicted, medium
+               FROM documents WHERE group_id=? ORDER BY page_number ASC""",
+            (group_id,)
+        ).fetchall())
+
+        group["entities"] = rows_to_list(conn.execute(
+            """SELECT e.id, e.name, e.type, ge.role, ge.context
+               FROM group_entities ge JOIN entities e ON e.id = ge.entity_id
+               WHERE ge.group_id=?""",
+            (group_id,)
+        ).fetchall())
+
+        group["transactions"] = rows_to_list(conn.execute(
+            "SELECT * FROM group_transactions WHERE group_id=? ORDER BY date",
+            (group_id,)
+        ).fetchall())
+
+        group["tags"] = rows_to_list(conn.execute(
+            """SELECT t.id, t.name, t.color FROM group_tags gt
+               JOIN tags t ON t.id = gt.tag_id WHERE gt.group_id=?""",
+            (group_id,)
+        ).fetchall())
+
+    return jsonify(group)
+
+
+# ── Update group ──────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>", methods=["PATCH"])
+def update_group(group_id):
+    _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
+
+    data    = request.get_json(silent=True) or {}
+    allowed = {"title", "date_depicted", "date_range_start", "date_range_end",
+               "location", "medium", "dimensions", "description", "language",
+               "transcription", "annotation", "is_key_evidence", "is_trashed", "source_archive"}
+    updates = {k: v for k, v in data.items() if k in allowed}
+
+    if not updates:
+        return jsonify({"error": "No valid fields to update"}), 400
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        conn.execute(
+            f"UPDATE document_groups SET {set_clause}, updated_at=datetime('now') WHERE id=?",
+            list(updates.values()) + [group_id]
+        )
+
+    return jsonify({"ok": True, "updated": list(updates.keys())})
+
+
+# ── Delete group ──────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>", methods=["DELETE"])
+def delete_group(group_id):
+    _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        # ON DELETE SET NULL handles freeing the pages automatically
+        conn.execute("DELETE FROM document_groups WHERE id=?", (group_id,))
+
+    return jsonify({"ok": True, "deleted": group_id})
+
+
+# ── Reorder pages ─────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>/pages", methods=["PATCH"])
+def reorder_pages(group_id):
+    _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
+
+    data       = request.get_json(silent=True) or {}
+    page_order = data.get("page_order", [])
+
+    if not page_order:
+        return jsonify({"error": "page_order is required"}), 400
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        for page_number, doc_id in enumerate(page_order, start=1):
+            conn.execute(
+                "UPDATE documents SET page_number=? WHERE id=? AND group_id=?",
+                (page_number, doc_id, group_id)
+            )
+
+    return jsonify({"ok": True})
+
+
+# ── Re-extract ────────────────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>/re-extract", methods=["POST"])
+def re_extract_group(group_id):
+    PHOTOS_DIR, API_KEY, _, _, _, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag = _get_deps()
+    from modules.extractor import extract_from_images, generate_text_embedding
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        pages = conn.execute(
+            "SELECT id, filename FROM documents WHERE group_id=? ORDER BY page_number ASC",
+            (group_id,)
+        ).fetchall()
+
+    if not pages:
+        return jsonify({"error": "No pages in this group"}), 400
+
+    image_paths = [PHOTOS_DIR / p["filename"] for p in pages]
+    missing = [str(p) for p in image_paths if not p.exists()]
+    if missing:
+        return jsonify({"error": f"Image files not found: {missing}"}), 404
+
+    extracted = extract_from_images(image_paths, API_KEY)
+    embed_text = " ".join(filter(None, [
+        extracted.get("title", ""),
+        extracted.get("description", ""),
+        " ".join(extracted.get("tags", [])),
+    ]))
+    embedding = generate_text_embedding(embed_text, API_KEY)
+
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE document_groups SET
+                title=?, date_depicted=?, date_range_start=?, date_range_end=?,
+                location=?, medium=?, dimensions=?, description=?, language=?,
+                transcription=?, raw_claude_response=?, is_key_evidence=?,
+                embedding_json=?, updated_at=datetime('now')
+               WHERE id=?""",
+            (
+                extracted.get("title"),
+                extracted.get("date_depicted"), extracted.get("date_range_start"),
+                extracted.get("date_range_end"), extracted.get("location"),
+                extracted.get("medium"), extracted.get("dimensions"),
+                extracted.get("description"), extracted.get("language"),
+                extracted.get("transcription"), json.dumps(extracted),
+                1 if extracted.get("key_evidence") else 0,
+                json.dumps(embedding) if embedding else None,
+                group_id,
+            )
+        )
+        # Replace entities and transactions
+        conn.execute("DELETE FROM group_entities     WHERE group_id=?", (group_id,))
+        conn.execute("DELETE FROM group_transactions WHERE group_id=?", (group_id,))
+        conn.execute("DELETE FROM group_tags         WHERE group_id=?", (group_id,))
+
+        for ent in (extracted.get("entities") or []):
+            if not ent.get("name"):
+                continue
+            entity_id = upsert_entity(conn, ent["name"], ent.get("type", "unknown"))
+            if entity_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO group_entities (group_id, entity_id, role, context) VALUES (?,?,?,?)",
+                    (group_id, entity_id, ent.get("role"), ent.get("context"))
+                )
+
+        for txn in (extracted.get("transactions") or []):
+            conn.execute(
+                """INSERT INTO group_transactions
+                   (group_id, seller, buyer, date, price, currency,
+                    auction_house, lot_number, location, notes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    group_id,
+                    txn.get("seller"), txn.get("buyer"), txn.get("date"),
+                    _to_float(txn.get("price")), txn.get("currency"),
+                    txn.get("auction_house"),
+                    str(txn.get("lot_number")) if txn.get("lot_number") else None,
+                    txn.get("location"), txn.get("notes"),
+                )
+            )
+
+        for tag_name in (extracted.get("tags") or []):
+            if not tag_name:
+                continue
+            tag_id = get_or_create_tag(conn, str(tag_name).strip())
+            if tag_id:
+                conn.execute(
+                    "INSERT OR IGNORE INTO group_tags (group_id, tag_id) VALUES (?,?)",
+                    (group_id, tag_id)
+                )
+
+    return jsonify({"ok": True})
+
+
+# ── Group tag management ──────────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>/tags", methods=["POST"])
+def add_group_tag(group_id):
+    _, _, _, _, _, get_db, _, _, _, get_or_create_tag = _get_deps()
+
+    data   = request.get_json(silent=True) or {}
+    tag_id = data.get("tag_id")
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        if tag_id is None:
+            return jsonify({"error": "tag_id is required"}), 400
+        if not conn.execute("SELECT 1 FROM tags WHERE id=?", (tag_id,)).fetchone():
+            return jsonify({"error": "Tag not found"}), 404
+        conn.execute(
+            "INSERT OR IGNORE INTO group_tags (group_id, tag_id) VALUES (?,?)",
+            (group_id, tag_id)
+        )
+        tag = conn.execute("SELECT id, name, color FROM tags WHERE id=?", (tag_id,)).fetchone()
+
+    return jsonify(dict(tag)), 201
+
+
+@bp.route("/api/groups/<int:group_id>/tags/<int:tag_id>", methods=["DELETE"])
+def remove_group_tag(group_id, tag_id):
+    _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+        conn.execute(
+            "DELETE FROM group_tags WHERE group_id=? AND tag_id=?",
+            (group_id, tag_id)
+        )
+
+    return jsonify({"ok": True})
+
+
+# ── Helper ────────────────────────────────────────────────────────────────────
+
+def _to_float(value):
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except (ValueError, TypeError):
+        return None

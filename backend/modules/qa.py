@@ -79,30 +79,60 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
             "citations":  [],
         }
 
-    doc_ids = [d["id"] for d in docs]
+    # Separate standalone docs from group results
+    solo_docs  = [d for d in docs if d.get("record_type") != "group"]
+    group_hits = [d for d in docs if d.get("record_type") == "group"]
 
-    # 2. Pull transactions for these documents
+    doc_ids   = [d["id"] for d in solo_docs]
+    group_ids = [g["id"] for g in group_hits]
+
+    # 2. Pull transactions and full details
     with get_db() as conn:
-        placeholders = ",".join("?" * len(doc_ids))
-        txns = conn.execute(
-            f"""SELECT t.*, d.title as doc_title
-                FROM transactions t
-                JOIN documents d ON d.id = t.document_id
-                WHERE t.document_id IN ({placeholders})
-                ORDER BY t.date""",
-            doc_ids,
-        ).fetchall()
+        txn_blocks_raw = []
 
-        # Also get full document details (including raw_claude_response)
-        full_docs = conn.execute(
-            f"SELECT * FROM documents WHERE id IN ({placeholders})",
-            doc_ids,
-        ).fetchall()
-        full_docs_map = {d["id"]: dict(d) for d in full_docs}
+        if doc_ids:
+            placeholders = ",".join("?" * len(doc_ids))
+            txns = conn.execute(
+                f"""SELECT t.*, d.title as doc_title
+                    FROM transactions t
+                    JOIN documents d ON d.id = t.document_id
+                    WHERE t.document_id IN ({placeholders})
+                    ORDER BY t.date""",
+                doc_ids,
+            ).fetchall()
+            txn_blocks_raw.extend(txns)
+
+            full_docs = conn.execute(
+                f"SELECT * FROM documents WHERE id IN ({placeholders})",
+                doc_ids,
+            ).fetchall()
+            full_docs_map = {d["id"]: dict(d) for d in full_docs}
+        else:
+            full_docs_map = {}
+
+        if group_ids:
+            gplaceholders = ",".join("?" * len(group_ids))
+            group_txns = conn.execute(
+                f"""SELECT gt.*, g.title as doc_title, gt.group_id as document_id
+                    FROM group_transactions gt
+                    JOIN document_groups g ON g.id = gt.group_id
+                    WHERE gt.group_id IN ({gplaceholders})
+                    ORDER BY gt.date""",
+                group_ids,
+            ).fetchall()
+            txn_blocks_raw.extend(group_txns)
+
+            full_groups = conn.execute(
+                f"SELECT * FROM document_groups WHERE id IN ({gplaceholders})",
+                group_ids,
+            ).fetchall()
+            full_groups_map = {g["id"]: dict(g) for g in full_groups}
+        else:
+            full_groups_map = {}
 
     # 3. Build context blocks
     doc_blocks = []
-    for doc in docs:
+    for doc in solo_docs:
         full = full_docs_map.get(doc["id"], doc)
         block_lines = [
             f"[Doc #{doc['id']}] {full.get('title', 'Untitled')}",
@@ -114,8 +144,20 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
             block_lines.append(f"Researcher note: {full['annotation']}")
         doc_blocks.append("\n".join(block_lines))
 
+    for grp in group_hits:
+        full = full_groups_map.get(grp["id"], grp)
+        block_lines = [
+            f"[Doc #{grp['id']}] (multi-page group) {full.get('title', 'Untitled')}",
+            f"Date: {full.get('date_depicted') or full.get('date_range_start') or 'Unknown'}",
+            f"Location: {full.get('location') or 'Unknown'}",
+            f"Description: {full.get('description') or ''}",
+        ]
+        if full.get("annotation"):
+            block_lines.append(f"Researcher note: {full['annotation']}")
+        doc_blocks.append("\n".join(block_lines))
+
     txn_blocks = []
-    for txn in txns:
+    for txn in txn_blocks_raw:
         t = dict(txn)
         parts = [f"[Doc #{t['document_id']}]"]
         if t.get("date"):        parts.append(f"Date: {t['date']}")
@@ -171,14 +213,16 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
     for doc in docs:
         if doc["id"] in cited_ids:
             citations.append({
-                "doc_id":  doc["id"],
-                "title":   doc.get("title", "Untitled"),
-                "snippet": doc.get("description", "")[:200],
+                "doc_id":       doc["id"],
+                "title":        doc.get("title", "Untitled"),
+                "snippet":      doc.get("description", "")[:200],
+                "record_type":  doc.get("record_type", "document"),
             })
 
+    all_source_ids = doc_ids + group_ids
     return {
         "answer":     answer_text,
-        "sources":    doc_ids,
+        "sources":    all_source_ids,
         "confidence": confidence,
         "citations":  citations,
     }

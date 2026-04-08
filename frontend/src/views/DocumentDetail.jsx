@@ -294,6 +294,23 @@ export default function DocumentDetail() {
         </div>
       </div>
 
+      {/* Group banner */}
+      {doc.group_id && (
+        <div style={{
+          background: '#eef4fb',
+          borderBottom: '1px solid #b8d0eb',
+          padding: '0.5rem 2rem',
+          fontSize: '0.85rem',
+          color: '#1a3a5c',
+        }}>
+          This is page {doc.page_number} of a{' '}
+          <Link to={`/groups/${doc.group_id}`} style={{ color: 'var(--navy-light)', fontWeight: 600 }}>
+            multi-page document group
+          </Link>.
+          {' '}Canonical metadata and transcription are on the group record.
+        </div>
+      )}
+
       {/* Trashed banner */}
       {!!doc.is_trashed && (
         <div style={{

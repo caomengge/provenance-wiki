@@ -163,6 +163,99 @@ CREATE TRIGGER IF NOT EXISTS documents_update_ts AFTER UPDATE ON documents
 WHEN old.updated_at = new.updated_at BEGIN
     UPDATE documents SET updated_at = datetime('now') WHERE id = new.id;
 END;
+
+-- ── Document Groups (multi-page documents) ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS document_groups (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    title            TEXT,
+    date_depicted    TEXT,
+    date_range_start TEXT,
+    date_range_end   TEXT,
+    location         TEXT,
+    medium           TEXT,
+    dimensions       TEXT,
+    description      TEXT,
+    language         TEXT,
+    transcription    TEXT,
+    raw_claude_response TEXT,
+    annotation       TEXT,
+    is_key_evidence  INTEGER NOT NULL DEFAULT 0,
+    is_trashed       INTEGER NOT NULL DEFAULT 0,
+    embedding_json   TEXT,
+    source_archive   TEXT,
+    created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS group_entities (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id  INTEGER NOT NULL REFERENCES document_groups(id) ON DELETE CASCADE,
+    entity_id INTEGER NOT NULL REFERENCES entities(id)        ON DELETE CASCADE,
+    role      TEXT,
+    context   TEXT,
+    UNIQUE(group_id, entity_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS group_transactions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id      INTEGER NOT NULL REFERENCES document_groups(id) ON DELETE CASCADE,
+    seller        TEXT,
+    buyer         TEXT,
+    date          TEXT,
+    price         REAL,
+    currency      TEXT,
+    auction_house TEXT,
+    lot_number    TEXT,
+    location      TEXT,
+    notes         TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS group_tags (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES document_groups(id) ON DELETE CASCADE,
+    tag_id   INTEGER NOT NULL REFERENCES tags(id)            ON DELETE CASCADE,
+    UNIQUE(group_id, tag_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_groups_date       ON document_groups(date_depicted);
+CREATE INDEX IF NOT EXISTS idx_groups_key        ON document_groups(is_key_evidence);
+CREATE INDEX IF NOT EXISTS idx_group_entities_g  ON group_entities(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_txn_g       ON group_transactions(group_id);
+CREATE INDEX IF NOT EXISTS idx_group_tags_g      ON group_tags(group_id);
+
+-- FTS for groups
+CREATE VIRTUAL TABLE IF NOT EXISTS groups_fts USING fts5(
+    title,
+    description,
+    annotation,
+    raw_claude_response,
+    content='document_groups',
+    content_rowid='id',
+    tokenize='unicode61 remove_diacritics 0'
+);
+
+CREATE TRIGGER IF NOT EXISTS groups_ai AFTER INSERT ON document_groups BEGIN
+    INSERT INTO groups_fts(rowid, title, description, annotation, raw_claude_response)
+    VALUES (new.id, new.title, new.description, new.annotation, new.raw_claude_response);
+END;
+
+CREATE TRIGGER IF NOT EXISTS groups_ad AFTER DELETE ON document_groups BEGIN
+    INSERT INTO groups_fts(groups_fts, rowid, title, description, annotation, raw_claude_response)
+    VALUES ('delete', old.id, old.title, old.description, old.annotation, old.raw_claude_response);
+END;
+
+CREATE TRIGGER IF NOT EXISTS groups_au AFTER UPDATE ON document_groups BEGIN
+    INSERT INTO groups_fts(groups_fts, rowid, title, description, annotation, raw_claude_response)
+    VALUES ('delete', old.id, old.title, old.description, old.annotation, old.raw_claude_response);
+    INSERT INTO groups_fts(rowid, title, description, annotation, raw_claude_response)
+    VALUES (new.id, new.title, new.description, new.annotation, new.raw_claude_response);
+END;
+
+CREATE TRIGGER IF NOT EXISTS groups_update_ts AFTER UPDATE ON document_groups
+WHEN old.updated_at = new.updated_at BEGIN
+    UPDATE document_groups SET updated_at = datetime('now') WHERE id = new.id;
+END;
 """
 
 
@@ -204,6 +297,9 @@ def init_db():
         _migrate(conn, "ALTER TABLE documents ADD COLUMN is_trashed INTEGER NOT NULL DEFAULT 0")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN source_archive TEXT")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN transcription TEXT")
+        _migrate(conn, "ALTER TABLE documents ADD COLUMN group_id INTEGER REFERENCES document_groups(id) ON DELETE SET NULL")
+        _migrate(conn, "ALTER TABLE documents ADD COLUMN page_number INTEGER")
+        _migrate(conn, "CREATE INDEX IF NOT EXISTS idx_documents_group ON documents(group_id)")
     return True
 
 

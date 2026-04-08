@@ -76,44 +76,56 @@ def _keyword_search(query, page, per_page, offset, tag_ids, entity_id, snippet_t
     with get_db() as conn:
         # Build base query with optional filters
         joins, wheres, params = _build_filters(tag_ids, entity_id, source_archive)
+        where_str = (' AND ' + ' AND '.join(wheres)) if wheres else ''
 
-        count_sql = f"""
-            SELECT COUNT(*) as cnt
-            FROM documents_fts fts
-            JOIN documents d ON d.id = fts.rowid
-            {joins}
-            WHERE documents_fts MATCH ?
-            {' AND ' + ' AND '.join(wheres) if wheres else ''}
-        """
-        params_with_q = [fts_query] + params
-        total = conn.execute(count_sql, params_with_q).fetchone()["cnt"]
+        # Documents (standalone only)
+        doc_where = where_str + ' AND d.group_id IS NULL'
+        count_docs = conn.execute(
+            f"SELECT COUNT(*) as cnt FROM documents_fts fts JOIN documents d ON d.id = fts.rowid {joins} WHERE documents_fts MATCH ?{doc_where}",
+            [fts_query] + params,
+        ).fetchone()["cnt"]
 
-        results_sql = f"""
-            SELECT
-                d.*,
-                bm25(documents_fts) AS score,
-                snippet(documents_fts, 1, '<mark>', '</mark>', '…', ?) AS snippet
-            FROM documents_fts fts
-            JOIN documents d ON d.id = fts.rowid
-            {joins}
-            WHERE documents_fts MATCH ?
-            {' AND ' + ' AND '.join(wheres) if wheres else ''}
-            ORDER BY bm25(documents_fts)
-            LIMIT ? OFFSET ?
-        """
-        rows = conn.execute(
-            results_sql,
-            [snippet_tokens, fts_query] + params + [per_page, offset],
+        doc_rows = conn.execute(
+            f"""SELECT d.*, bm25(documents_fts) AS score,
+                snippet(documents_fts, 1, '<mark>', '</mark>', '…', ?) AS snippet,
+                'document' as record_type
+                FROM documents_fts fts JOIN documents d ON d.id = fts.rowid {joins}
+                WHERE documents_fts MATCH ?{doc_where}""",
+            [snippet_tokens, fts_query] + params,
         ).fetchall()
 
+        # Groups
+        count_groups = conn.execute(
+            "SELECT COUNT(*) as cnt FROM groups_fts gfts JOIN document_groups g ON g.id = gfts.rowid WHERE groups_fts MATCH ? AND g.is_trashed=0",
+            [fts_query],
+        ).fetchone()["cnt"]
+
+        group_rows = conn.execute(
+            """SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
+                      g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
+                      g.description, g.annotation,
+                      bm25(groups_fts) AS score,
+                      snippet(groups_fts, 1, '<mark>', '</mark>', '…', ?) AS snippet,
+                      'group' as record_type
+               FROM groups_fts gfts JOIN document_groups g ON g.id = gfts.rowid
+               WHERE groups_fts MATCH ? AND g.is_trashed=0""",
+            [snippet_tokens, fts_query],
+        ).fetchall()
+
+        total = count_docs + count_groups
+
+        # Merge and sort by score, then paginate
         results = []
-        for row in rows:
+        for row in list(doc_rows) + list(group_rows):
             d = dict(row)
             d["score"]   = abs(d.get("score") or 0)
             d["snippet"] = d.get("snippet") or ""
             d.pop("embedding_json", None)
             d.pop("raw_claude_response", None)
             results.append(d)
+
+        results.sort(key=lambda x: x["score"], reverse=True)
+        results = results[offset: offset + per_page]
 
     return {
         "results":  results,

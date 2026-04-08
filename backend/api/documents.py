@@ -39,7 +39,8 @@ def list_documents():
     per_page     = min(int(request.args.get("per_page", DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
     offset       = (page - 1) * per_page
     key_only     = request.args.get("key_evidence", "").lower() == "true"
-    show_trashed = request.args.get("show_trashed", "").lower() == "true"
+    show_trashed  = request.args.get("show_trashed", "").lower() == "true"
+    hide_grouped  = request.args.get("hide_grouped", "1") != "0"
     tag_id       = request.args.get("tag_id", type=int)
     entity_id    = request.args.get("entity_id", type=int)
     date_from    = request.args.get("date_from")
@@ -57,6 +58,8 @@ def list_documents():
         trash_filter = "d.is_trashed = 1" if show_trashed else "d.is_trashed = 0"
         joins, wheres, params = [], [trash_filter], []
 
+        if hide_grouped:
+            wheres.append("d.group_id IS NULL")
         if key_only:
             wheres.append("d.is_key_evidence = 1")
         if tag_id:

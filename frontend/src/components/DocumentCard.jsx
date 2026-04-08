@@ -14,11 +14,15 @@ import api from '../api/client'
 export default function DocumentCard({ doc, view = 'grid', selectMode = false, selected = false, onToggleSelect }) {
   const navigate = useNavigate()
 
+  const isGroup   = !!doc._isGroup
+  const detailUrl = isGroup ? `/groups/${doc.id}` : `/documents/${doc.id}`
+
   const handleCardClick = (e) => {
     if (e.target.type === 'checkbox') return   // let checkbox handle its own event
 
     if (selectMode && onToggleSelect) {
-      e.preventDefault()                        // stay on page in select mode
+      if (isGroup) return                       // groups are not selectable for batch ops
+      e.preventDefault()
       onToggleSelect(doc.id)
       return
     }
@@ -26,8 +30,8 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
     // Modifier keys / middle-click → let the browser open a new tab naturally
     if (e.ctrlKey || e.metaKey || e.shiftKey) return
 
-    e.preventDefault()                          // SPA navigation for plain left-click
-    navigate(`/documents/${doc.id}`)
+    e.preventDefault()
+    navigate(detailUrl)
   }
 
   const handleCheckboxClick = (e) => {
@@ -35,10 +39,12 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
     if (onToggleSelect) onToggleSelect(doc.id)
   }
 
-  const title  = doc.title || doc.filename || `Document #${doc.id}`
+  const title  = doc.title || doc.filename || (isGroup ? `Group #${doc.id}` : `Document #${doc.id}`)
   const date   = doc.date_depicted || doc.date_range_start || ''
-  const imgUrl = api.getDocumentImageUrl(doc.id)
-  const href   = `/documents/${doc.id}`
+  const imgUrl = isGroup && doc.first_page_id
+    ? api.getDocumentImageUrl(doc.first_page_id)
+    : api.getDocumentImageUrl(doc.id)
+  const href   = detailUrl
 
   // ── List view ──────────────────────────────────────────────────────────────
   if (view === 'list') {
@@ -135,6 +141,16 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
           loading="lazy"
           onError={(e) => { e.target.parentElement.style.background = 'var(--navy-mid)'; e.target.style.display = 'none' }}
         />
+
+        {/* Group badge */}
+        {isGroup && (
+          <span style={{
+            position: 'absolute', top: '0.4rem', left: '0.4rem',
+            background: 'var(--navy)', color: 'white',
+            fontSize: '0.7rem', fontWeight: 700, padding: '1px 5px',
+            borderRadius: '2px', letterSpacing: '0.04em',
+          }}>⊞ {doc.page_count} pages</span>
+        )}
 
         {/* Key evidence badge */}
         {doc.is_key_evidence ? (

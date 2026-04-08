@@ -6,8 +6,9 @@ const TAG_COLORS = [
   '#8b6914','#4a6741','#7a3f4e','#3d6b7a','#7a5c3d',
 ]
 
-/** Tag manager for a document: view/add/remove tags inline. */
-export default function TagManager({ docId, initialTags = [] }) {
+/** Tag manager for a document or group: view/add/remove tags inline.
+ *  Pass isGroup=true + groupId=<id> to manage group tags. */
+export default function TagManager({ docId, initialTags = [], isGroup = false, groupId }) {
   const [tags, setTags]         = useState(initialTags)
   const [allTags, setAllTags]   = useState([])
   const [newName, setNewName]   = useState('')
@@ -24,7 +25,11 @@ export default function TagManager({ docId, initialTags = [] }) {
   const addExisting = async (tag) => {
     if (tags.find(t => t.id === tag.id)) return
     try {
-      await api.addDocTag(docId, tag.id)
+      if (isGroup) {
+        await api.addGroupTag(groupId, tag.id)
+      } else {
+        await api.addDocTag(docId, tag.id)
+      }
       setTags(prev => [...prev, tag])
     } catch (err) {
       console.error(err)
@@ -36,7 +41,11 @@ export default function TagManager({ docId, initialTags = [] }) {
     setAdding(true)
     try {
       const tag = await api.createTag(newName.trim(), newColor)
-      await api.addDocTag(docId, tag.id)
+      if (isGroup) {
+        await api.addGroupTag(groupId, tag.id)
+      } else {
+        await api.addDocTag(docId, tag.id)
+      }
       setTags(prev => [...prev, tag])
       setAllTags(prev => [...prev, tag])
       setNewName('')
@@ -50,7 +59,11 @@ export default function TagManager({ docId, initialTags = [] }) {
 
   const removeTag = async (tagId) => {
     try {
-      await api.removeDocTag(docId, tagId)
+      if (isGroup) {
+        await api.removeGroupTag(groupId, tagId)
+      } else {
+        await api.removeDocTag(docId, tagId)
+      }
       setTags(prev => prev.filter(t => t.id !== tagId))
     } catch (err) {
       console.error(err)
