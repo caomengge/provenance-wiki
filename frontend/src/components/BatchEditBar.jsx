@@ -42,6 +42,10 @@ export default function BatchEditBar({
   const count    = selectedIds.size
   const navigate = useNavigate()
 
+  // Split composite keys (e.g. "d:123", "g:45") into doc and group id lists
+  const docIds   = [...selectedIds].filter(k => typeof k === 'string' && k.startsWith('d:')).map(k => Number(k.slice(2)))
+  const groupIds = [...selectedIds].filter(k => typeof k === 'string' && k.startsWith('g:')).map(k => Number(k.slice(2)))
+
   // Which panel is open: null | 'source' | 'tag' | 'group'
   const [panel, setPanel] = useState(null)
 
@@ -88,9 +92,10 @@ export default function BatchEditBar({
     setSourceApplying(true)
     try {
       const value = sourceValue.trim() || null
-      await Promise.all([...selectedIds].map(id =>
-        api.updateDocument(id, { source_archive: value })
-      ))
+      await Promise.all([
+        ...docIds.map(id   => api.updateDocument(id, { source_archive: value })),
+        ...groupIds.map(id => api.updateGroup(id,    { source_archive: value })),
+      ])
       setPanel(null)
       setSourceValue('')
       onDone()
@@ -107,7 +112,10 @@ export default function BatchEditBar({
     if (tagApplying != null) return
     setTagApplying(tagId)
     try {
-      await Promise.all([...selectedIds].map(id => api.addDocTag(id, tagId)))
+      await Promise.all([
+        ...docIds.map(id   => api.addDocTag(id, tagId)),
+        ...groupIds.map(id => api.addGroupTag(id, tagId)),
+      ])
       onDone()
     } catch (err) {
       alert(err.message)
@@ -122,7 +130,10 @@ export default function BatchEditBar({
     try {
       const tag = await api.createTag(newTagName.trim(), newTagColor)
       setAllTags(prev => [...prev, tag])
-      await Promise.all([...selectedIds].map(id => api.addDocTag(id, tag.id)))
+      await Promise.all([
+        ...docIds.map(id   => api.addDocTag(id, tag.id)),
+        ...groupIds.map(id => api.addGroupTag(id, tag.id)),
+      ])
       setNewTagName('')
       onDone()
     } catch (err) {
@@ -136,9 +147,14 @@ export default function BatchEditBar({
 
   const createGroup = async () => {
     if (groupCreating) return
+    if (groupIds.length > 0) {
+      alert('Cannot group existing multi-page groups. Select only individual pages.')
+      return
+    }
+    if (docIds.length < 2) return
     setGroupCreating(true)
     try {
-      const result = await api.createGroup([...selectedIds], groupTitle.trim() || undefined)
+      const result = await api.createGroup(docIds, groupTitle.trim() || undefined)
       navigate(`/groups/${result.group_id}`)
     } catch (err) {
       alert(err.message)
@@ -180,7 +196,7 @@ export default function BatchEditBar({
           {exporting ? '…' : '↓ Export PDF'}
         </button>
 
-        {count >= 2 && (
+        {docIds.length >= 2 && groupIds.length === 0 && (
           <button
             className={`btn ${panel === 'group' ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => togglePanel('group')}

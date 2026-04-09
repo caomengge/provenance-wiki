@@ -16,14 +16,15 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
 
   const isGroup   = !!doc._isGroup
   const detailUrl = isGroup ? `/groups/${doc.id}` : `/documents/${doc.id}`
+  const selectKey = (isGroup ? 'g:' : 'd:') + doc.id
 
   const handleCardClick = (e) => {
     if (e.target.type === 'checkbox') return   // let checkbox handle its own event
 
-    if (selectMode && onToggleSelect) {
-      if (isGroup) return                       // groups are not selectable for batch ops
-      e.preventDefault()
-      onToggleSelect(doc.id)
+    if (selectMode) {
+      e.preventDefault()                        // always suppress anchor navigation in select mode
+      if (!onToggleSelect) return
+      onToggleSelect(selectKey)
       return
     }
 
@@ -35,8 +36,9 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
   }
 
   const handleCheckboxClick = (e) => {
+    e.preventDefault()
     e.stopPropagation()
-    if (onToggleSelect) onToggleSelect(doc.id)
+    if (onToggleSelect) onToggleSelect(selectKey)
   }
 
   const title  = doc.title || doc.filename || (isGroup ? `Group #${doc.id}` : `Document #${doc.id}`)

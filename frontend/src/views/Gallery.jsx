@@ -71,11 +71,11 @@ export default function Gallery({ onStatsUpdate }) {
     api.getEntities({ per_page: 500 }).then(r => setEntities(r.entities || [])).catch(() => {})
   }, [])
 
-  const toggleSelect = (docId) => {
+  const toggleSelect = (selectKey) => {
     setSelectedIds(prev => {
       const next = new Set(prev)
-      if (next.has(docId)) next.delete(docId)
-      else next.add(docId)
+      if (next.has(selectKey)) next.delete(selectKey)
+      else next.add(selectKey)
       return next
     })
   }
@@ -90,7 +90,7 @@ export default function Gallery({ onStatsUpdate }) {
     if (selectedIds.size === docs.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(docs.map(d => d.id)))
+      setSelectedIds(new Set(docs.map(d => (d._isGroup ? 'g:' : 'd:') + d.id)))
     }
   }
 
@@ -98,6 +98,15 @@ export default function Gallery({ onStatsUpdate }) {
     if (selectedIds.size === 0) return
     setExporting(true)
     try {
+      // Export endpoint currently only supports individual documents
+      const docIds = [...selectedIds]
+        .filter(k => k.startsWith('d:'))
+        .map(k => Number(k.slice(2)))
+      if (docIds.length === 0) {
+        alert('PDF export currently supports individual documents only.')
+        setExporting(false)
+        return
+      }
       const form   = document.createElement('form')
       form.method  = 'POST'
       form.action  = '/api/export/selection'
@@ -105,7 +114,7 @@ export default function Gallery({ onStatsUpdate }) {
       const input  = document.createElement('input')
       input.type   = 'hidden'
       input.name   = 'doc_ids'
-      input.value  = JSON.stringify([...selectedIds])
+      input.value  = JSON.stringify(docIds)
       form.appendChild(input)
       document.body.appendChild(form)
       form.submit()
@@ -215,29 +224,35 @@ export default function Gallery({ onStatsUpdate }) {
           </div>
         ) : view === 'grid' ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem' }}>
-            {docs.map(doc => (
-              <DocumentCard
-                key={doc.id}
-                doc={doc}
-                view="grid"
-                selectMode={selectMode}
-                selected={selectedIds.has(doc.id)}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
+            {docs.map(doc => {
+              const key = (doc._isGroup ? 'g:' : 'd:') + doc.id
+              return (
+                <DocumentCard
+                  key={key}
+                  doc={doc}
+                  view="grid"
+                  selectMode={selectMode}
+                  selected={selectedIds.has(key)}
+                  onToggleSelect={toggleSelect}
+                />
+              )
+            })}
           </div>
         ) : (
           <div>
-            {docs.map(doc => (
-              <DocumentCard
-                key={doc.id}
-                doc={doc}
-                view="list"
-                selectMode={selectMode}
-                selected={selectedIds.has(doc.id)}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
+            {docs.map(doc => {
+              const key = (doc._isGroup ? 'g:' : 'd:') + doc.id
+              return (
+                <DocumentCard
+                  key={key}
+                  doc={doc}
+                  view="list"
+                  selectMode={selectMode}
+                  selected={selectedIds.has(key)}
+                  onToggleSelect={toggleSelect}
+                />
+              )
+            })}
           </div>
         )}
 
