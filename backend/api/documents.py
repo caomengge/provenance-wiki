@@ -84,6 +84,18 @@ def list_documents():
         join_sql  = " ".join(joins)
         where_sql = "WHERE " + " AND ".join(wheres)
 
+        # date_depicted can be NULL, so fall back to date_range_start and push
+        # empty values to the end regardless of sort direction.
+        if sort == "date_depicted":
+            order_sql = (
+                f"ORDER BY COALESCE(d.date_depicted, d.date_range_start) IS NULL, "
+                f"COALESCE(d.date_depicted, d.date_range_start) {order}"
+            )
+        elif sort == "title":
+            order_sql = f"ORDER BY d.title IS NULL, d.title COLLATE NOCASE {order}"
+        else:
+            order_sql = f"ORDER BY d.{sort} {order}"
+
         total = conn.execute(
             f"SELECT COUNT(DISTINCT d.id) as cnt FROM documents d {join_sql} {where_sql}",
             params
@@ -95,7 +107,7 @@ def list_documents():
                        d.medium, d.is_key_evidence, d.annotation,
                        d.source_archive, d.created_at, d.updated_at
                 FROM documents d {join_sql} {where_sql}
-                ORDER BY d.{sort} {order}
+                {order_sql}
                 LIMIT ? OFFSET ?""",
             params + [per_page, offset]
         ).fetchall()

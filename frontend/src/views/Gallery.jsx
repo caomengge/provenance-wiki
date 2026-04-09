@@ -44,8 +44,8 @@ export default function Gallery({ onStatsUpdate }) {
       if (filterArchive) params.source_archive = filterArchive
       if (filterEntity)  params.entity_id      = filterEntity
 
-      // Groups share the same filter shape but don't use sort/order.
-      const groupParams = { page, per_page: perPage === 'all' ? 9999 : perPage }
+      // Groups share the same filter shape and sort params as documents.
+      const groupParams = { page, per_page: perPage === 'all' ? 9999 : perPage, sort, order }
       if (keyOnly)       groupParams.key_evidence   = 'true'
       if (filterTag)     groupParams.tag_id         = filterTag
       if (filterArchive) groupParams.source_archive = filterArchive
@@ -58,7 +58,28 @@ export default function Gallery({ onStatsUpdate }) {
 
       const groups = (groupsRes.groups || []).map(g => ({ ...g, _isGroup: true }))
       const combined = [...groups, ...(docsRes.documents || [])]
-      combined.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+
+      // Sort the merged list by whatever the user picked. For date_depicted,
+      // fall back to date_range_start, then created_at so rows with NULL dates
+      // still end up in a deterministic place (always at the end).
+      const sortKey = (item) => {
+        if (sort === 'title')         return (item.title || '').toLowerCase()
+        if (sort === 'date_depicted') return item.date_depicted || item.date_range_start || ''
+        if (sort === 'updated_at')    return item.updated_at || item.created_at || ''
+        return item.created_at || ''
+      }
+      const dir = order === 'asc' ? 1 : -1
+      combined.sort((a, b) => {
+        const va = sortKey(a)
+        const vb = sortKey(b)
+        // Push empty/null values to the end regardless of direction
+        if (!va && !vb) return 0
+        if (!va) return 1
+        if (!vb) return -1
+        if (va < vb) return -1 * dir
+        if (va > vb) return  1 * dir
+        return 0
+      })
 
       setDocs(combined)
       setTotal((docsRes.total || 0) + (groupsRes.total || 0))

@@ -173,6 +173,24 @@ def list_groups():
     date_to        = request.args.get("date_to")
     source_archive = request.args.get("source_archive")
 
+    sort  = request.args.get("sort", "created_at")
+    order = "DESC" if request.args.get("order", "desc").lower() == "desc" else "ASC"
+    allowed_sort = {"created_at", "date_depicted", "title", "updated_at"}
+    if sort not in allowed_sort:
+        sort = "created_at"
+
+    # date_depicted can be NULL, so fall back to date_range_start and push
+    # empty values to the end regardless of sort direction.
+    if sort == "date_depicted":
+        order_sql = (
+            f"ORDER BY COALESCE(g.date_depicted, g.date_range_start) IS NULL, "
+            f"COALESCE(g.date_depicted, g.date_range_start) {order}"
+        )
+    elif sort == "title":
+        order_sql = f"ORDER BY g.title IS NULL, g.title COLLATE NOCASE {order}"
+    else:
+        order_sql = f"ORDER BY g.{sort} {order}"
+
     joins, wheres, params = [], ["g.is_trashed = 0"], []
 
     if key_only:
@@ -206,7 +224,8 @@ def list_groups():
         ).fetchone()["c"]
 
         rows = conn.execute(
-            f"""SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
+            f"""SELECT g.id, g.title, g.date_depicted, g.date_range_start,
+                       g.date_range_end, g.location, g.medium,
                        g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
                        COUNT(d.id) as page_count,
                        MIN(d.id) as first_page_id
@@ -215,7 +234,7 @@ def list_groups():
                 LEFT JOIN documents d ON d.group_id = g.id
                 {where_sql}
                 GROUP BY g.id
-                ORDER BY g.created_at DESC
+                {order_sql}
                 LIMIT ? OFFSET ?""",
             params + [per_page, offset]
         ).fetchall()
