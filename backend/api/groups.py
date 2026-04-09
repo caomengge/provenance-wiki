@@ -272,8 +272,22 @@ def delete_group(group_id):
     with get_db() as conn:
         if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
             abort(404)
-        # ON DELETE SET NULL handles freeing the pages automatically
+        # ON DELETE SET NULL frees the pages automatically; CASCADE removes
+        # group_entities, group_transactions, and group_tags.
         conn.execute("DELETE FROM document_groups WHERE id=?", (group_id,))
+
+        # Clean up entities and tags that are no longer referenced by any
+        # document or group (orphans from this deletion).
+        conn.execute("""
+            DELETE FROM entities
+            WHERE id NOT IN (SELECT entity_id FROM document_entities)
+              AND id NOT IN (SELECT entity_id FROM group_entities)
+        """)
+        conn.execute("""
+            DELETE FROM tags
+            WHERE id NOT IN (SELECT tag_id FROM document_tags)
+              AND id NOT IN (SELECT tag_id FROM group_tags)
+        """)
 
     return jsonify({"ok": True, "deleted": group_id})
 

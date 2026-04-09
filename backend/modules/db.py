@@ -300,6 +300,19 @@ def init_db():
         _migrate(conn, "ALTER TABLE documents ADD COLUMN group_id INTEGER REFERENCES document_groups(id) ON DELETE SET NULL")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN page_number INTEGER")
         _migrate(conn, "CREATE INDEX IF NOT EXISTS idx_documents_group ON documents(group_id)")
+
+        # Sweep any pre-existing orphan entities and tags left behind by
+        # deletions that occurred before the cleanup logic was added.
+        conn.execute("""
+            DELETE FROM entities
+            WHERE id NOT IN (SELECT entity_id FROM document_entities)
+              AND id NOT IN (SELECT entity_id FROM group_entities)
+        """)
+        conn.execute("""
+            DELETE FROM tags
+            WHERE id NOT IN (SELECT tag_id FROM document_tags)
+              AND id NOT IN (SELECT tag_id FROM group_tags)
+        """)
     return True
 
 

@@ -249,8 +249,21 @@ def delete_document(doc_id):
 
         filename = doc["filename"]
 
-        # Delete DB record — CASCADE removes entities, transactions, links, tags
+        # Delete DB record — CASCADE removes document_entities, transactions, links, document_tags
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
+
+        # Clean up entities and tags that are no longer referenced by any
+        # document or group (orphans from this deletion).
+        conn.execute("""
+            DELETE FROM entities
+            WHERE id NOT IN (SELECT entity_id FROM document_entities)
+              AND id NOT IN (SELECT entity_id FROM group_entities)
+        """)
+        conn.execute("""
+            DELETE FROM tags
+            WHERE id NOT IN (SELECT tag_id FROM document_tags)
+              AND id NOT IN (SELECT tag_id FROM group_tags)
+        """)
 
     # Delete photo from disk (best-effort; non-fatal if already missing)
     photo_path = PHOTOS_DIR / filename
