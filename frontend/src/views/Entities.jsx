@@ -60,7 +60,8 @@ function EditRow({ entity, allEntities, onSave, onCancel, onMerge, onDelete }) {
     setMerging(true)
     setError('')
     try {
-      await onMerge(entity.id, parseInt(mergeTarget, 10))
+      // "Merge this entity INTO target" → keep target, discard this entity.
+      await onMerge(parseInt(mergeTarget, 10), entity.id)
     } catch (err) {
       setError(err.message)
       setMerging(false)
@@ -154,7 +155,7 @@ function EditRow({ entity, allEntities, onSave, onCancel, onMerge, onDelete }) {
               onChange={e => setMergeTarget(e.target.value)}
               style={{ flex: 1, fontFamily: 'var(--font-serif)', fontSize: '0.82rem' }}
             >
-              <option value="">— keep this entity, discard… —</option>
+              <option value="">— merge this entity into… —</option>
               {others.map(e => (
                 <option key={e.id} value={e.id}>{e.name} ({e.type})</option>
               ))}

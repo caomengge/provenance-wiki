@@ -283,15 +283,30 @@ def merge_entities():
         if not conn.execute("SELECT 1 FROM entities WHERE id=?", (discard_id,)).fetchone():
             return jsonify({"error": f"Entity {discard_id} not found"}), 404
 
-        # Re-point all document_entities rows
+        # Re-point all document_entities rows to the surviving entity.
+        # UPDATE OR IGNORE skips rows that would violate the
+        # (document_id, entity_id, role) UNIQUE constraint (i.e. the same
+        # document already had both entities in the same role); the DELETE
+        # below then removes those leftover duplicates.
         conn.execute(
-            """UPDATE OR IGNORE document_entities SET entity_id=? WHERE entity_id=?""",
+            "UPDATE OR IGNORE document_entities SET entity_id=? WHERE entity_id=?",
             (keep_id, discard_id)
         )
-        # Delete any that caused UNIQUE conflicts (already linked to keep_id)
         conn.execute(
             "DELETE FROM document_entities WHERE entity_id=?", (discard_id,)
         )
+
+        # Same treatment for group_entities so multi-page groups also keep
+        # their link to the surviving entity instead of losing it to the
+        # CASCADE when the discarded entity is deleted below.
+        conn.execute(
+            "UPDATE OR IGNORE group_entities SET entity_id=? WHERE entity_id=?",
+            (keep_id, discard_id)
+        )
+        conn.execute(
+            "DELETE FROM group_entities WHERE entity_id=?", (discard_id,)
+        )
+
         conn.execute("DELETE FROM entities WHERE id=?", (discard_id,))
 
     return jsonify({"ok": True, "merged_into": keep_id})
