@@ -331,13 +331,19 @@ def remove_document_entity(doc_id, entity_id):
 
 @bp.route("/api/archives", methods=["GET"])
 def list_archives():
-    """Return all distinct source_archive values for autocomplete."""
+    """Return all distinct source_archive values (from documents and groups)
+    for autocomplete and filter dropdowns."""
     PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT DISTINCT source_archive FROM documents "
-            "WHERE source_archive IS NOT NULL AND source_archive != '' "
-            "ORDER BY source_archive COLLATE NOCASE"
+            """SELECT DISTINCT source_archive FROM (
+                   SELECT source_archive FROM documents
+                   WHERE source_archive IS NOT NULL AND source_archive != ''
+                   UNION
+                   SELECT source_archive FROM document_groups
+                   WHERE source_archive IS NOT NULL AND source_archive != ''
+               )
+               ORDER BY source_archive COLLATE NOCASE"""
         ).fetchall()
     return jsonify({"archives": [r["source_archive"] for r in rows]})
 

@@ -44,9 +44,16 @@ export default function Gallery({ onStatsUpdate }) {
       if (filterArchive) params.source_archive = filterArchive
       if (filterEntity)  params.entity_id      = filterEntity
 
+      // Groups share the same filter shape but don't use sort/order.
+      const groupParams = { page, per_page: perPage === 'all' ? 9999 : perPage }
+      if (keyOnly)       groupParams.key_evidence   = 'true'
+      if (filterTag)     groupParams.tag_id         = filterTag
+      if (filterArchive) groupParams.source_archive = filterArchive
+      if (filterEntity)  groupParams.entity_id      = filterEntity
+
       const [docsRes, groupsRes] = await Promise.all([
         api.getDocuments(params),
-        api.getGroups({ page, per_page: perPage === 'all' ? 9999 : perPage }),
+        api.getGroups(groupParams),
       ])
 
       const groups = (groupsRes.groups || []).map(g => ({ ...g, _isGroup: true }))

@@ -166,23 +166,58 @@ def list_groups():
     per_page = min(int(request.args.get("per_page", DEFAULT_PAGE_SIZE)), MAX_PAGE_SIZE)
     offset   = (page - 1) * per_page
 
+    key_only       = request.args.get("key_evidence", "").lower() == "true"
+    tag_id         = request.args.get("tag_id",    type=int)
+    entity_id      = request.args.get("entity_id", type=int)
+    date_from      = request.args.get("date_from")
+    date_to        = request.args.get("date_to")
+    source_archive = request.args.get("source_archive")
+
+    joins, wheres, params = [], ["g.is_trashed = 0"], []
+
+    if key_only:
+        wheres.append("g.is_key_evidence = 1")
+    if tag_id:
+        joins.append("JOIN group_tags gt ON gt.group_id = g.id AND gt.tag_id = ?")
+        params.append(tag_id)
+    if entity_id:
+        joins.append("JOIN group_entities ge ON ge.group_id = g.id AND ge.entity_id = ?")
+        params.append(entity_id)
+    if date_from:
+        wheres.append("COALESCE(g.date_depicted, g.date_range_start) >= ?")
+        params.append(date_from)
+    if date_to:
+        wheres.append("COALESCE(g.date_depicted, g.date_range_start) <= ?")
+        params.append(date_to)
+    if source_archive:
+        if source_archive == "__none__":
+            wheres.append("(g.source_archive IS NULL OR g.source_archive = '')")
+        else:
+            wheres.append("g.source_archive = ?")
+            params.append(source_archive)
+
+    join_sql  = " ".join(joins)
+    where_sql = "WHERE " + " AND ".join(wheres)
+
     with get_db() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) as c FROM document_groups WHERE is_trashed=0"
+            f"SELECT COUNT(DISTINCT g.id) as c FROM document_groups g {join_sql} {where_sql}",
+            params
         ).fetchone()["c"]
 
         rows = conn.execute(
-            """SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
-                      g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
-                      COUNT(d.id) as page_count,
-                      MIN(d.id) as first_page_id
-               FROM document_groups g
-               LEFT JOIN documents d ON d.group_id = g.id
-               WHERE g.is_trashed = 0
-               GROUP BY g.id
-               ORDER BY g.created_at DESC
-               LIMIT ? OFFSET ?""",
-            (per_page, offset)
+            f"""SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
+                       g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
+                       COUNT(d.id) as page_count,
+                       MIN(d.id) as first_page_id
+                FROM document_groups g
+                {join_sql}
+                LEFT JOIN documents d ON d.group_id = g.id
+                {where_sql}
+                GROUP BY g.id
+                ORDER BY g.created_at DESC
+                LIMIT ? OFFSET ?""",
+            params + [per_page, offset]
         ).fetchall()
 
     return jsonify({
