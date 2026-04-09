@@ -200,7 +200,8 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
 
     with get_db() as conn:
         if existing_id:
-            # UPDATE existing record in-place (preserves annotation, tags, links)
+            # UPDATE existing record in-place (preserves annotation, tags, links,
+            # and the user-set is_key_evidence flag across re-extraction).
             conn.execute(
                 """UPDATE documents SET
                     title               = ?,
@@ -214,7 +215,6 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     language            = ?,
                     raw_claude_response = ?,
                     transcription       = ?,
-                    is_key_evidence     = ?,
                     embedding_json      = ?,
                     source_archive      = COALESCE(source_archive, ?),
                     updated_at          = datetime('now')
@@ -231,7 +231,6 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     data.get("language"),
                     json.dumps(data),
                     data.get("transcription"),
-                    1 if data.get("key_evidence") else 0,
                     json.dumps(embedding) if embedding else None,
                     source_archive or None,
                     existing_id,
@@ -260,7 +259,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     data.get("language"),
                     json.dumps(data),
                     data.get("transcription"),
-                    1 if data.get("key_evidence") else 0,
+                    0,  # is_key_evidence — never set automatically; user flags manually
                     json.dumps(embedding) if embedding else None,
                     source_archive or None,
                 ),

@@ -59,18 +59,16 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
     }
   ],
   "transcription": "faithful word-for-word transcription of ALL visible text in the document, preserving original spelling, punctuation, and line breaks. Non-English text (Chinese, German, Hebrew, French, etc.) must be reproduced exactly as written — do not translate. Use [illegible] for unreadable words. Use [image] for non-text elements. If the document has no readable text, set this to null.",
-  "tags": ["relevant", "keyword", "tags", "describing", "this", "document"],
-  "key_evidence": false
+  "tags": ["relevant", "keyword", "tags", "describing", "this", "document"]
 }
 
 Critical rules:
 1. Preserve ALL non-English text (Chinese, German, Hebrew, French, etc.) EXACTLY as written — do not translate
 2. Extract EVERY person, institution, and artwork mentioned, even if mentioned briefly
 3. If multiple transactions are described, list each as a separate object in the transactions array
-4. Set key_evidence to true if this document directly proves ownership transfer or contains a handwritten signature/stamp
-5. tags should include: era/decade, document type, geographic region, transaction type, and any distinctive features
-6. If a field has no applicable information, use null (not empty string)
-7. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
+4. tags should include: era/decade, document type, geographic region, transaction type, and any distinctive features
+5. If a field has no applicable information, use null (not empty string)
+6. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
 
 
 # ── Multi-page extraction prompt ─────────────────────────────────────────────
@@ -110,16 +108,14 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
       "notes": "any additional details or null"
     }}
   ],
-  "tags": ["relevant", "keyword", "tags"],
-  "key_evidence": false
+  "tags": ["relevant", "keyword", "tags"]
 }}
 
 Critical rules:
 1. Preserve ALL non-English text EXACTLY as written — do not translate
 2. Extract EVERY person, institution, and artwork mentioned across all pages
 3. The transcription must cover all pages in order, separated by [Page N] markers
-4. Set key_evidence to true if this document directly proves ownership transfer
-5. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
+4. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
 
 
 # ── Main extraction function ──────────────────────────────────────────────────
@@ -203,7 +199,6 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
         "entities":          [],
         "transactions":      [],
         "tags":              ["extraction-failed"],
-        "key_evidence":      False,
     }
 
 
@@ -265,7 +260,6 @@ def extract_from_images(image_paths: list[Path], api_key: str) -> dict:
         "entities":    [],
         "transactions":[],
         "tags":        ["extraction-failed"],
-        "key_evidence": False,
     }
 
 

@@ -100,7 +100,7 @@ def create_group():
                 extracted.get("language"),
                 extracted.get("transcription"),
                 json.dumps(extracted),
-                1 if extracted.get("key_evidence") else 0,
+                0,  # is_key_evidence — never set automatically; user flags manually
                 json.dumps(embedding) if embedding else None,
                 extracted.get("source_archive"),
             )
@@ -348,11 +348,12 @@ def re_extract_group(group_id):
     embedding = generate_text_embedding(embed_text, API_KEY)
 
     with get_db() as conn:
+        # Preserve is_key_evidence (a user-set flag) across re-extraction.
         conn.execute(
             """UPDATE document_groups SET
                 title=?, date_depicted=?, date_range_start=?, date_range_end=?,
                 location=?, medium=?, dimensions=?, description=?, language=?,
-                transcription=?, raw_claude_response=?, is_key_evidence=?,
+                transcription=?, raw_claude_response=?,
                 embedding_json=?, updated_at=datetime('now')
                WHERE id=?""",
             (
@@ -362,7 +363,6 @@ def re_extract_group(group_id):
                 extracted.get("medium"), extracted.get("dimensions"),
                 extracted.get("description"), extracted.get("language"),
                 extracted.get("transcription"), json.dumps(extracted),
-                1 if extracted.get("key_evidence") else 0,
                 json.dumps(embedding) if embedding else None,
                 group_id,
             )
