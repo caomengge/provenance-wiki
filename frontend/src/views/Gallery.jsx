@@ -230,6 +230,12 @@ export default function Gallery({ onStatsUpdate }) {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem' }}>
             <button
               className="btn btn-ghost"
+              onClick={load}
+              title="Refresh"
+              style={{ padding: '0.3rem 0.6rem' }}
+            >↻</button>
+            <button
+              className="btn btn-ghost"
               onClick={() => setView('grid')}
               style={{ padding: '0.3rem 0.6rem', background: view === 'grid' ? 'var(--navy)' : undefined, color: view === 'grid' ? 'var(--cream-light)' : undefined }}
             >▤</button>
