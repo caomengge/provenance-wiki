@@ -112,19 +112,57 @@ def _keyword_search(query, page, per_page, offset, tag_ids, entity_id, snippet_t
             [snippet_tokens, fts_query],
         ).fetchall()
 
-        total = count_docs + count_groups
-
-        # Merge and sort by score, then paginate
-        results = []
+        # Merge FTS results keyed by (record_type, id) for deduplication
+        seen = {}
         for row in list(doc_rows) + list(group_rows):
             d = dict(row)
             d["score"]   = abs(d.get("score") or 0)
             d["snippet"] = d.get("snippet") or ""
             d.pop("embedding_json", None)
             d.pop("raw_claude_response", None)
-            results.append(d)
+            seen[(d["record_type"], d["id"])] = d
 
-        results.sort(key=lambda x: x["score"], reverse=True)
+        # Also search entity names and include linked docs/groups not already found
+        entity_matches = conn.execute(
+            "SELECT id FROM entities WHERE name LIKE ?",
+            [f"%{query}%"],
+        ).fetchall()
+        matched_entity_ids = [r["id"] for r in entity_matches]
+
+        if matched_entity_ids:
+            eid_ph = ",".join("?" * len(matched_entity_ids))
+
+            ent_doc_rows = conn.execute(
+                f"""SELECT d.*, 0.5 AS score, '' AS snippet, 'document' as record_type
+                    FROM documents d
+                    JOIN document_entities de ON de.document_id = d.id
+                    WHERE de.entity_id IN ({eid_ph})
+                      AND d.is_trashed = 0 AND d.group_id IS NULL""",
+                matched_entity_ids,
+            ).fetchall()
+
+            ent_group_rows = conn.execute(
+                f"""SELECT g.id, g.title, g.date_depicted, g.location, g.medium,
+                           g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
+                           g.description, g.annotation,
+                           0.5 AS score, '' AS snippet, 'group' as record_type
+                    FROM document_groups g
+                    JOIN group_entities ge ON ge.group_id = g.id
+                    WHERE ge.entity_id IN ({eid_ph})
+                      AND g.is_trashed = 0""",
+                matched_entity_ids,
+            ).fetchall()
+
+            for row in list(ent_doc_rows) + list(ent_group_rows):
+                d = dict(row)
+                d.pop("embedding_json", None)
+                d.pop("raw_claude_response", None)
+                key = (d["record_type"], d["id"])
+                if key not in seen:
+                    seen[key] = d
+
+        total = len(seen)
+        results = sorted(seen.values(), key=lambda x: x["score"], reverse=True)
         results = results[offset: offset + per_page]
 
     return {

@@ -200,6 +200,29 @@ def get_network(
                     }
                 edges[edge_key]["weight"] += 1
 
+            # Entity co-occurrence edges from group entities
+            cooc_group_sql = f"""
+                SELECT a.entity_id as ea, b.entity_id as eb, COUNT(*) as cnt
+                FROM group_entities a
+                JOIN group_entities b
+                  ON a.group_id = b.group_id AND a.entity_id < b.entity_id
+                WHERE a.group_id IN ({gplaceholders})
+                GROUP BY a.entity_id, b.entity_id
+                HAVING cnt >= 1
+            """
+            for row in conn.execute(cooc_group_sql, group_ids).fetchall():
+                ea, eb = row["ea"], row["eb"]
+                k = f"ent_{ea}__ent_{eb}"
+                if k not in edges:
+                    edges[k] = {
+                        "source":            f"ent_{ea}",
+                        "target":            f"ent_{eb}",
+                        "weight":            row["cnt"],
+                        "relationship_type": "co-occurrence",
+                    }
+                else:
+                    edges[k]["weight"] += row["cnt"]
+
     node_list = list(nodes.values())
     edge_list  = list(edges.values())
 

@@ -114,10 +114,15 @@ export default function Sidebar({ stats }) {
   }, [])
 
   const handleIngest = async () => {
+    const archive = archiveInput.trim()
+    if (!archive) {
+      setShowArchive(true)
+      setIngestMsg('Source is required before ingesting.')
+      return
+    }
     try {
       setIngesting(true)
       setIngestMsg('Starting…')
-      const archive = archiveInput.trim() || null
       const res = await api.startIngest(archive)
       setIngestMsg(res.message || 'Running…')
 
@@ -217,7 +222,7 @@ export default function Sidebar({ stats }) {
             letterSpacing: '0.03em',
           }}
         >
-          {showArchive ? '▾' : '▸'} Source{archiveInput.trim() ? `: ${archiveInput.trim()}` : ' (optional)'}
+          {showArchive ? '▾' : '▸'} Source{archiveInput.trim() ? `: ${archiveInput.trim()}` : ' (required)'}
         </button>
 
         {/* Collapsible input + datalist */}

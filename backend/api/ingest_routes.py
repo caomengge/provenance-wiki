@@ -22,7 +22,9 @@ def start_ingest():
         return jsonify({"error": "ANTHROPIC_API_KEY is not set in .env"}), 500
 
     body = request.get_json(silent=True) or {}
-    source_archive = (body.get("source_archive") or "").strip() or None
+    source_archive = (body.get("source_archive") or "").strip()
+    if not source_archive:
+        return jsonify({"error": "source_archive is required"}), 400
 
     result = _start(PHOTOS_DIR, ANTHROPIC_API_KEY, INGEST_BATCH_SIZE,
                     source_archive=source_archive)
