@@ -100,7 +100,7 @@ export default function Search() {
     if (selectedIds.size === results.length) {
       setSelectedIds(new Set())
     } else {
-      setSelectedIds(new Set(results.map(d => d.id)))
+      setSelectedIds(new Set(results.map(d => (d.record_type === 'group' ? 'g:' : 'd:') + d.id)))
     }
   }
 
@@ -248,16 +248,21 @@ export default function Search() {
               {activeArchiveLabel && ` · archive: ${activeArchiveLabel}`}
             </div>
 
-            {results.map(doc => (
-              <DocumentCard
-                key={doc.id}
-                doc={doc}
-                view="list"
-                selectMode={selectMode}
-                selected={selectedIds.has(doc.id)}
-                onToggleSelect={toggleSelect}
-              />
-            ))}
+            {results.map(doc => {
+              const isGroup = doc.record_type === 'group'
+              const cardDoc = isGroup ? { ...doc, _isGroup: true } : doc
+              const key     = (isGroup ? 'g:' : 'd:') + doc.id
+              return (
+                <DocumentCard
+                  key={key}
+                  doc={cardDoc}
+                  view="list"
+                  selectMode={selectMode}
+                  selected={selectedIds.has(key)}
+                  onToggleSelect={toggleSelect}
+                />
+              )
+            })}
 
             {totalPages > 1 && (
               <div className="pagination">
