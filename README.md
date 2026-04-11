@@ -90,7 +90,7 @@ In Terminal:
 The first time this runs, it will:
 1. Set up a Python environment (takes 1–2 minutes)
 2. Install the web interface (takes 1–2 minutes)
-3. Start the app on http://localhost:5000
+3. Start the app on http://localhost:5100
 
 Once you see `Starting Flask server on http://localhost:5100`, open your browser and go to:
 
