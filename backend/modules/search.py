@@ -339,7 +339,7 @@ def _filter_only_search(page, per_page, offset, tag_ids, entity_id, source_archi
 
         doc_rows = conn.execute(
             f"SELECT d.*, 'document' as record_type FROM documents d {doc_joins} WHERE {doc_where_clause}"
-            " ORDER BY d.date_of_origin DESC, d.id DESC",
+            " ORDER BY d.date_depicted DESC, d.id DESC",
             doc_params,
         ).fetchall()
 
