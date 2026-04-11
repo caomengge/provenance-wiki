@@ -298,32 +298,77 @@ def _build_filters(tag_ids, entity_id, source_archive=None):
 
 
 def _filter_only_search(page, per_page, offset, tag_ids, entity_id, source_archive):
-    """Return documents matching filters with no FTS query required."""
+    """Return documents and groups matching filters with no FTS query required."""
     from modules.db import get_db
 
-    joins, wheres, params = _build_filters(tag_ids, entity_id, source_archive)
-    where_clause = " AND ".join(wheres) if wheres else "1=1"
+    # Documents: restrict to standalone (not inside a group) to avoid duplication
+    doc_joins, doc_wheres, doc_params = _build_filters(tag_ids, entity_id, source_archive)
+    doc_wheres = doc_wheres + ["d.group_id IS NULL"]
+    doc_where_clause = " AND ".join(doc_wheres)
+
+    # Groups: build parallel filters against document_groups
+    g_joins  = ""
+    g_wheres = ["g.is_trashed = 0"]
+    g_params = []
+    if tag_ids:
+        placeholders = ",".join("?" * len(tag_ids))
+        g_joins += f"""
+            JOIN group_tags gt ON gt.group_id = g.id
+            JOIN tags t ON t.id = gt.tag_id AND t.id IN ({placeholders})
+        """
+        g_params.extend(tag_ids)
+    if entity_id:
+        g_joins += """
+            JOIN group_entities ge ON ge.group_id = g.id
+        """
+        g_wheres.append("ge.entity_id = ?")
+        g_params.append(entity_id)
+    if source_archive:
+        if source_archive == "__none__":
+            g_wheres.append("(g.source_archive IS NULL OR g.source_archive = '')")
+        else:
+            g_wheres.append("g.source_archive = ?")
+            g_params.append(source_archive)
+    g_where_clause = " AND ".join(g_wheres)
 
     with get_db() as conn:
-        total = conn.execute(
-            f"SELECT COUNT(*) as cnt FROM documents d {joins} WHERE {where_clause}",
-            params,
+        doc_total = conn.execute(
+            f"SELECT COUNT(*) as cnt FROM documents d {doc_joins} WHERE {doc_where_clause}",
+            doc_params,
         ).fetchone()["cnt"]
 
-        rows = conn.execute(
-            f"SELECT d.* FROM documents d {joins} WHERE {where_clause}"
-            " ORDER BY d.date_of_origin DESC, d.id DESC LIMIT ? OFFSET ?",
-            params + [per_page, offset],
+        doc_rows = conn.execute(
+            f"SELECT d.*, 'document' as record_type FROM documents d {doc_joins} WHERE {doc_where_clause}"
+            " ORDER BY d.date_of_origin DESC, d.id DESC",
+            doc_params,
         ).fetchall()
 
-    results = []
-    for row in rows:
+        group_total = conn.execute(
+            f"SELECT COUNT(DISTINCT g.id) as cnt FROM document_groups g {g_joins} WHERE {g_where_clause}",
+            g_params,
+        ).fetchone()["cnt"]
+
+        group_rows = conn.execute(
+            f"""SELECT DISTINCT g.id, g.title, g.date_depicted, g.location, g.medium,
+                       g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
+                       g.description, g.annotation,
+                       'group' as record_type
+                FROM document_groups g {g_joins} WHERE {g_where_clause}
+                ORDER BY g.date_depicted DESC, g.id DESC""",
+            g_params,
+        ).fetchall()
+
+    merged = []
+    for row in list(doc_rows) + list(group_rows):
         d = dict(row)
         d["score"]   = 0
         d["snippet"] = ""
         d.pop("embedding_json", None)
         d.pop("raw_claude_response", None)
-        results.append(d)
+        merged.append(d)
+
+    total   = doc_total + group_total
+    results = merged[offset: offset + per_page]
 
     return {"results": results, "total": total, "page": page, "per_page": per_page, "mode": "keyword", "query": ""}
 
