@@ -25,8 +25,6 @@ export default function Gallery({ onStatsUpdate }) {
   const [exporting, setExporting]     = useState(false)
 
   // Filter options
-  const [tags,          setTags]          = useState([])
-  const [filterTag,     setFilterTag]     = useState('')
   const [archives,      setArchives]      = useState([])
   const [filterArchive, setFilterArchive] = useState('')
   const [filterEntity,  setFilterEntity]  = useState('')
@@ -40,14 +38,12 @@ export default function Gallery({ onStatsUpdate }) {
     try {
       const params = { page, per_page: perPage === 'all' ? 9999 : perPage, sort, order }
       if (keyOnly)       params.key_evidence   = 'true'
-      if (filterTag)     params.tag_id         = filterTag
       if (filterArchive) params.source_archive = filterArchive
       if (filterEntity)  params.entity_id      = filterEntity
 
       // Groups share the same filter shape and sort params as documents.
       const groupParams = { page, per_page: perPage === 'all' ? 9999 : perPage, sort, order }
       if (keyOnly)       groupParams.key_evidence   = 'true'
-      if (filterTag)     groupParams.tag_id         = filterTag
       if (filterArchive) groupParams.source_archive = filterArchive
       if (filterEntity)  groupParams.entity_id      = filterEntity
 
@@ -88,13 +84,12 @@ export default function Gallery({ onStatsUpdate }) {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, sort, order, keyOnly, filterTag, filterArchive, filterEntity])
+  }, [page, perPage, sort, order, keyOnly, filterArchive, filterEntity])
 
   useEffect(() => { load() }, [load])
 
   // Load filter options once
   useEffect(() => {
-    api.getTags().then(r => setTags(r.tags || [])).catch(() => {})
     api.getArchives().then(r => setArchives(r.archives || [])).catch(() => {})
   }, [])
 
@@ -208,10 +203,6 @@ export default function Gallery({ onStatsUpdate }) {
           <select value={order} onChange={e => { setOrder(e.target.value); setPage(1) }} style={{ width: 'auto' }}>
             <option value="desc">Newest First</option>
             <option value="asc">Oldest First</option>
-          </select>
-          <select value={filterTag} onChange={e => { setFilterTag(e.target.value); setPage(1) }} style={{ width: 'auto' }}>
-            <option value="">All Tags</option>
-            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <select value={filterArchive} onChange={e => { setFilterArchive(e.target.value); setPage(1) }} style={{ width: 'auto' }}>
             <option value="">All Sources</option>
