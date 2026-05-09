@@ -317,6 +317,50 @@ def _prepare_image(path: Path, raw: bytes) -> bytes:
         return data
 
 
+def synthesize_group_text(pages_summary: list[dict], api_key: str) -> dict | None:
+    """
+    Text-only Claude call: given per-page summaries, return a unified
+    {title, description} for the group. No images sent — fast and cheap
+    compared to a vision re-extraction. Returns None if the call fails;
+    callers should fall back to merge defaults.
+    """
+    if not api_key or not pages_summary:
+        return None
+
+    prompt = (
+        f"You are an expert museum archivist. Below are per-page summaries of a "
+        f"{len(pages_summary)}-page document. Produce a single unified title and "
+        "description for the document as a whole, treating all pages as one item.\n\n"
+        f"Pages:\n{json.dumps(pages_summary, ensure_ascii=False, indent=2)}\n\n"
+        "Return ONLY a valid JSON object — no markdown, no code fences:\n"
+        "{\n"
+        '  "title": "short descriptive title for the whole document",\n'
+        '  "description": "3-5 sentences describing what the document shows '
+        'across all pages and its provenance significance"\n'
+        "}"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.rsplit("```", 1)[0].strip()
+        result = json.loads(text)
+        if isinstance(result, dict) and result.get("title") and result.get("description"):
+            return {"title": result["title"], "description": result["description"]}
+    except Exception:
+        logger.exception("Text-only group synthesis failed")
+    return None
+
+
 def _get_media_type(path: Path) -> str:
     """Return MIME type string for the given image path."""
     ext = path.suffix.lower()

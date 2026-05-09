@@ -32,15 +32,24 @@ def _get_deps():
 @bp.route("/api/groups", methods=["POST"])
 def create_group():
     """
-    Body: { "doc_ids": [1, 2, 3], "title": "optional" }
-    Validates docs, extracts all pages in one Claude call, creates group record.
+    Body: { "doc_ids": [1, 2, 3], "title": "optional", "vision": false }
+
+    Default behaviour merges the already-extracted data of the child pages and
+    runs a tiny text-only Claude call to synthesize a unified title and
+    description — no images uploaded, ~1-2s instead of 30-60s.
+
+    Pass {"vision": true} to force a full vision re-extraction (slower, more
+    accurate when individual page extractions were poor). The user can also
+    trigger this later via the per-group "Re-extract" button.
     """
     PHOTOS_DIR, API_KEY, _, _, MULTIPAGE_MAX_PAGES, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag = _get_deps()
-    from modules.extractor import extract_from_images, generate_text_embedding
+    from modules.extractor import extract_from_images, generate_text_embedding, synthesize_group_text
+    from modules.group_merge import merge_pages_data
 
-    data    = request.get_json(silent=True) or {}
-    doc_ids = data.get("doc_ids", [])
-    title   = data.get("title", "").strip() or None
+    data       = request.get_json(silent=True) or {}
+    doc_ids    = data.get("doc_ids", [])
+    title      = data.get("title", "").strip() or None
+    use_vision = bool(data.get("vision"))
 
     if not doc_ids or len(doc_ids) < 2:
         return jsonify({"error": "At least 2 documents required to create a group"}), 400
@@ -63,24 +72,34 @@ def create_group():
 
         # Sort filenames lexicographically → natural page order
         pages_sorted = sorted(rows, key=lambda r: r["filename"])
+        sorted_ids   = [r["id"] for r in pages_sorted]
+
+        # Merge / extract OUTSIDE the connection where possible — but the merge
+        # path needs the connection, so do it here before closing.
+        if not use_vision:
+            extracted = merge_pages_data(conn, sorted_ids)
 
     source_archives = [r["source_archive"] for r in pages_sorted if r["source_archive"]]
     inherited_source_archive = source_archives[0] if source_archives else None
 
-    image_paths = [PHOTOS_DIR / r["filename"] for r in pages_sorted]
-    missing = [str(p) for p in image_paths if not p.exists()]
-    if missing:
-        return jsonify({"error": f"Image files not found: {missing}"}), 404
-
-    # Extract from all pages in one API call
-    extracted = extract_from_images(image_paths, API_KEY)
+    if use_vision:
+        image_paths = [PHOTOS_DIR / r["filename"] for r in pages_sorted]
+        missing = [str(p) for p in image_paths if not p.exists()]
+        if missing:
+            return jsonify({"error": f"Image files not found: {missing}"}), 404
+        extracted = extract_from_images(image_paths, API_KEY)
+    else:
+        # Text-only synthesis for a better title/description than page-1 fallback.
+        synth = synthesize_group_text(extracted.pop("_pages_summary", []), API_KEY)
+        if synth:
+            extracted["title"]       = synth["title"]
+            extracted["description"] = synth["description"]
 
     embed_text = " ".join(filter(None, [
         extracted.get("title", ""),
         extracted.get("description", ""),
         " ".join(extracted.get("tags", [])),
     ]))
-    from modules.extractor import generate_text_embedding
     embedding = generate_text_embedding(embed_text, API_KEY)
 
     with get_db() as conn:
