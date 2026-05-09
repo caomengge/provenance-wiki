@@ -196,9 +196,9 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
           {date || 'Date unknown'}
           {doc.location ? ` · ${doc.location}` : ''}
         </div>
-        {doc.medium && (
+        {(doc.medium || (!isGroup && doc.filename)) && (
           <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginTop: '0.2rem' }}>
-            {doc.medium}
+            {doc.medium}{doc.medium && !isGroup && doc.filename ? ' · ' : ''}{!isGroup && doc.filename ? doc.filename : ''}
           </div>
         )}
       </div>
