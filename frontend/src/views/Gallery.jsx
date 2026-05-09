@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
+import EntityCombobox from '../components/EntityCombobox'
 import api from '../api/client'
 
 const SORT_OPTIONS = [
@@ -28,7 +29,6 @@ export default function Gallery({ onStatsUpdate }) {
   const [filterTag,     setFilterTag]     = useState('')
   const [archives,      setArchives]      = useState([])
   const [filterArchive, setFilterArchive] = useState('')
-  const [entities,      setEntities]      = useState([])
   const [filterEntity,  setFilterEntity]  = useState('')
 
   const [perPage, setPerPage] = useState(50)
@@ -96,7 +96,6 @@ export default function Gallery({ onStatsUpdate }) {
   useEffect(() => {
     api.getTags().then(r => setTags(r.tags || [])).catch(() => {})
     api.getArchives().then(r => setArchives(r.archives || [])).catch(() => {})
-    api.getEntities({ per_page: 500 }).then(r => setEntities(r.entities || [])).catch(() => {})
   }, [])
 
   const toggleSelect = (selectKey) => {
@@ -219,10 +218,12 @@ export default function Gallery({ onStatsUpdate }) {
             <option value="__none__">— No Source</option>
             {archives.map(a => <option key={a} value={a}>{a}</option>)}
           </select>
-          <select value={filterEntity} onChange={e => { setFilterEntity(e.target.value); setPage(1) }} style={{ width: 'auto' }}>
-            <option value="">All Entities</option>
-            {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.type})</option>)}
-          </select>
+          <EntityCombobox
+            value={filterEntity}
+            onChange={(id) => { setFilterEntity(id); setPage(1) }}
+            placeholder="All Entities"
+            style={{ minWidth: '200px' }}
+          />
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', textTransform: 'none', fontWeight: 400, fontSize: '0.9rem', cursor: 'pointer', marginBottom: 0 }}>
             <input type="checkbox" checked={keyOnly} onChange={e => { setKeyOnly(e.target.checked); setPage(1) }} />
             Key evidence only
