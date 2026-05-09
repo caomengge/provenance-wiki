@@ -15,6 +15,7 @@ import json
 import logging
 
 from flask import Blueprint, abort, jsonify, request
+from modules.ingestor import _normalize_date
 
 bp = Blueprint("groups", __name__)
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def create_group():
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 title or extracted.get("title"),
-                extracted.get("date_depicted"),
+                _normalize_date(extracted.get("date_depicted")),
                 extracted.get("date_range_start"),
                 extracted.get("date_range_end"),
                 extracted.get("location"),
@@ -412,7 +413,7 @@ def re_extract_group(group_id):
                WHERE id=?""",
             (
                 extracted.get("title"),
-                extracted.get("date_depicted"), extracted.get("date_range_start"),
+                _normalize_date(extracted.get("date_depicted")), extracted.get("date_range_start"),
                 extracted.get("date_range_end"), extracted.get("location"),
                 extracted.get("medium"), extracted.get("dimensions"),
                 extracted.get("description"), extracted.get("language"),

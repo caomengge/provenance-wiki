@@ -29,7 +29,7 @@ Analyze this document image carefully and extract ALL provenance-related informa
 Return ONLY a valid JSON object with this exact structure (no other text before or after):
 {
   "title": "a short descriptive title for this document (e.g., 'Sale receipt, Sotheby's London, 1938')",
-  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if known, otherwise null",
+  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if clearly indicated; if no date is clearly present in the document use the string \"date unknown\"",
   "date_range_start": "earliest date this document could relate to, YYYY-MM-DD or null",
   "date_range_end": "latest date this document could relate to, YYYY-MM-DD or null",
   "location": "primary location mentioned or associated with this document",
@@ -78,7 +78,7 @@ MULTI_PAGE_EXTRACTION_PROMPT = """You are an expert museum archivist and provena
 Return ONLY a valid JSON object with this exact structure (no other text before or after):
 {{
   "title": "a short descriptive title for this document",
-  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if known, otherwise null",
+  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if clearly indicated; if no date is clearly present in the document use the string \"date unknown\"",
   "date_range_start": "earliest date this document could relate to, YYYY-MM-DD or null",
   "date_range_end": "latest date this document could relate to, YYYY-MM-DD or null",
   "location": "primary location mentioned or associated with this document",
