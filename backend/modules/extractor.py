@@ -69,7 +69,7 @@ Critical rules:
 4. tags should include: era/decade, document type, geographic region, transaction type, and any distinctive features
 5. If a field has no applicable information, use null (not empty string)
 6. Return ONLY valid JSON — no markdown, no explanation, no code fences
-7. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use "date unknown""""
+7. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
 
 
 # ── Multi-page extraction prompt ─────────────────────────────────────────────
@@ -117,7 +117,7 @@ Critical rules:
 2. Extract EVERY person, institution, and artwork mentioned across all pages
 3. The transcription must cover all pages in order, separated by [Page N] markers
 4. Return ONLY valid JSON — no markdown, no explanation, no code fences
-5. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use "date unknown""""
+5. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
 
 
 # ── Main extraction function ──────────────────────────────────────────────────
