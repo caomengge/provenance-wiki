@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import api from '../api/client'
 import EntityTag from '../components/EntityTag'
@@ -6,6 +6,7 @@ import AnnotationPanel from '../components/AnnotationPanel'
 import TagManager from '../components/TagManager'
 import InlineEdit from '../components/InlineEdit'
 import EvidenceFlag from '../components/EvidenceFlag'
+import TransactionEditor from '../components/TransactionEditor'
 
 export default function GroupDetail() {
   const { id }     = useParams()
@@ -20,6 +21,14 @@ export default function GroupDetail() {
   // Delete
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleting, setDeleting]               = useState(false)
+
+  // Entity management
+  const [addingEntity,  setAddingEntity]  = useState(false)
+  const [newEntityName, setNewEntityName] = useState('')
+  const [newEntityType, setNewEntityType] = useState('person')
+  const [newEntityRole, setNewEntityRole] = useState('')
+  const [entitySaving,  setEntitySaving]  = useState(false)
+  const entityNameRef = useRef(null)
 
   // Transcription modal
   const [showTranscription, setShowTranscription] = useState(false)
@@ -46,10 +55,38 @@ export default function GroupDetail() {
   }
 
   useEffect(() => { load() }, [id])
+  useEffect(() => { if (addingEntity) entityNameRef.current?.focus() }, [addingEntity])
 
   const save = async (field, value) => {
     await api.updateGroup(id, { [field]: value })
     setGroup(prev => ({ ...prev, [field]: value }))
+  }
+
+  const removeEntity = async (entityId) => {
+    try {
+      await api.removeGroupEntity(id, entityId)
+      setGroup(prev => ({ ...prev, entities: prev.entities.filter(e => e.id !== entityId) }))
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  const addEntity = async () => {
+    const name = newEntityName.trim()
+    if (!name) return
+    setEntitySaving(true)
+    try {
+      const res = await api.addGroupEntity(id, name, newEntityType, newEntityRole.trim() || undefined)
+      const newEnt = { ...res.entity, role: res.role }
+      setGroup(prev => ({ ...prev, entities: [...(prev.entities || []), newEnt] }))
+      setNewEntityName('')
+      setNewEntityRole('')
+      setAddingEntity(false)
+    } catch (err) {
+      alert(err.message)
+    } finally {
+      setEntitySaving(false)
+    }
   }
 
   const handleDelete = async () => {
@@ -254,34 +291,7 @@ export default function GroupDetail() {
           </div>
 
           {/* Transactions */}
-          {group.transactions?.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                Transactions ({group.transactions.length})
-              </h3>
-              {group.transactions.map(t => (
-                <div key={t.id} style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '0.75rem', marginBottom: '0.75rem' }}>
-                  {t.date && <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{t.date}</div>}
-                  {(t.seller || t.buyer) && (
-                    <div style={{ fontSize: '0.9rem' }}>
-                      {t.seller && <span><em>Seller:</em> {t.seller}</span>}
-                      {t.seller && t.buyer && <span style={{ margin: '0 0.5rem' }}>→</span>}
-                      {t.buyer && <span><em>Buyer:</em> {t.buyer}</span>}
-                    </div>
-                  )}
-                  {t.price && (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                      {t.currency} {Number(t.price).toLocaleString()}
-                      {t.auction_house && ` · ${t.auction_house}`}
-                      {t.lot_number && ` lot ${t.lot_number}`}
-                    </div>
-                  )}
-                  {t.location && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.location}</div>}
-                  {t.notes && <div style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>{t.notes}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+          <TransactionEditor transactions={group.transactions || []} groupId={group.id} />
 
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '1rem' }}>
             <div>Created: {new Date(group.created_at).toLocaleDateString()}</div>
@@ -305,9 +315,56 @@ export default function GroupDetail() {
 
           {/* Entities */}
           <div>
-            <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: '0 0 0.75rem' }}>
-              Entities {group.entities?.length > 0 && `(${group.entities.length})`}
-            </h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+              <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: 0 }}>
+                Entities {group.entities?.length > 0 && `(${group.entities.length})`}
+              </h3>
+              <button
+                onClick={() => setAddingEntity(v => !v)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--navy-light)', fontWeight: 600, padding: 0 }}
+              >
+                {addingEntity ? 'Cancel' : '+ Add'}
+              </button>
+            </div>
+
+            {addingEntity && (
+              <div style={{ background: 'var(--cream-card)', border: '1px solid var(--border)', borderRadius: '4px', padding: '0.75rem', marginBottom: '0.75rem' }}>
+                <input
+                  ref={entityNameRef}
+                  type="text"
+                  value={newEntityName}
+                  onChange={e => setNewEntityName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addEntity(); if (e.key === 'Escape') setAddingEntity(false) }}
+                  placeholder="Entity name…"
+                  style={{ width: '100%', fontSize: '0.88rem', marginBottom: '0.5rem', boxSizing: 'border-box' }}
+                />
+                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                  <select
+                    value={newEntityType}
+                    onChange={e => setNewEntityType(e.target.value)}
+                    style={{ flex: 1, fontSize: '0.85rem' }}
+                  >
+                    {ENTITY_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    value={newEntityRole}
+                    onChange={e => setNewEntityRole(e.target.value)}
+                    placeholder="Role (optional)…"
+                    style={{ flex: 1, fontSize: '0.85rem' }}
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={addEntity}
+                  disabled={!newEntityName.trim() || entitySaving}
+                  style={{ fontSize: '0.82rem', padding: '0.3rem 0.75rem' }}
+                >
+                  {entitySaving ? 'Saving…' : 'Add Entity'}
+                </button>
+              </div>
+            )}
+
             {ENTITY_TYPES.map(type => {
               const grp = (group.entities || []).filter(e => e.type === type)
               if (!grp.length) return null
@@ -317,13 +374,27 @@ export default function GroupDetail() {
                     {type}s
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                    {grp.map(e => <EntityTag key={`${e.id}-${e.role}`} entity={e} />)}
+                    {grp.map(e => (
+                      <span key={`${e.id}-${e.role}`} style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+                        <EntityTag entity={e} />
+                        <button
+                          onClick={() => removeEntity(e.id)}
+                          title={`Remove ${e.name}`}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-light)', fontSize: '0.75rem', lineHeight: 1, padding: '0 2px', marginBottom: '0.3rem' }}
+                          onMouseEnter={e => e.currentTarget.style.color = 'var(--rust)'}
+                          onMouseLeave={e => e.currentTarget.style.color = 'var(--text-light)'}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
                   </div>
                 </div>
               )
             })}
-            {(!group.entities || group.entities.length === 0) && (
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-light)', fontStyle: 'italic' }}>No entities extracted yet.</div>
+
+            {(!group.entities || group.entities.length === 0) && !addingEntity && (
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-light)', fontStyle: 'italic' }}>No entities — click + Add to add one</div>
             )}
           </div>
         </div>

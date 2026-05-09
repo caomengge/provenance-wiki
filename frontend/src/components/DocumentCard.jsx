@@ -42,7 +42,7 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
   }
 
   const title  = doc.title || doc.filename || (isGroup ? `Group #${doc.id}` : `Document #${doc.id}`)
-  const date   = doc.date_depicted || doc.date_range_start || ''
+  const date   = doc.date_depicted || ''
   const imgUrl = isGroup && doc.first_page_id
     ? api.getDocumentImageUrl(doc.first_page_id)
     : api.getDocumentImageUrl(doc.id)

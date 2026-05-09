@@ -7,6 +7,7 @@ import EvidenceFlag from '../components/EvidenceFlag'
 import TagManager from '../components/TagManager'
 import DocumentLinkModal from '../components/DocumentLinkModal'
 import InlineEdit from '../components/InlineEdit'
+import TransactionEditor from '../components/TransactionEditor'
 
 export default function DocumentDetail() {
   const { id }       = useParams()
@@ -425,34 +426,7 @@ export default function DocumentDetail() {
           </div>
 
           {/* Transactions */}
-          {doc.transactions?.length > 0 && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                Transactions ({doc.transactions.length})
-              </h3>
-              {doc.transactions.map(t => (
-                <div key={t.id} style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '0.75rem', marginBottom: '0.75rem' }}>
-                  {t.date && <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{t.date}</div>}
-                  {(t.seller || t.buyer) && (
-                    <div style={{ fontSize: '0.9rem' }}>
-                      {t.seller && <span><em>Seller:</em> {t.seller}</span>}
-                      {t.seller && t.buyer && <span style={{ margin: '0 0.5rem' }}>→</span>}
-                      {t.buyer && <span><em>Buyer:</em> {t.buyer}</span>}
-                    </div>
-                  )}
-                  {t.price && (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                      {t.currency} {Number(t.price).toLocaleString()}
-                      {t.auction_house && ` · ${t.auction_house}`}
-                      {t.lot_number && ` lot ${t.lot_number}`}
-                    </div>
-                  )}
-                  {t.location && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.location}</div>}
-                  {t.notes && <div style={{ fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>{t.notes}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+          <TransactionEditor transactions={doc.transactions || []} docId={id} />
 
           {/* Linked documents */}
           {doc.links?.length > 0 && (

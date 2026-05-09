@@ -221,7 +221,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                    WHERE id = ?""",
                 (
                     data.get("title"),
-                    data.get("date_depicted"),
+                    _normalize_date(data.get("date_depicted")),
                     data.get("date_range_start"),
                     data.get("date_range_end"),
                     data.get("location"),
@@ -249,7 +249,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     photo_path.name,
                     sha,
                     data.get("title"),
-                    data.get("date_depicted"),
+                    _normalize_date(data.get("date_depicted")),
                     data.get("date_range_start"),
                     data.get("date_range_end"),
                     data.get("location"),
@@ -324,6 +324,13 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def _normalize_date(value) -> str | None:
+    """Convert 'date unknown' (LLM sentinel) to None for DB storage."""
+    if isinstance(value, str) and value.strip().lower() == "date unknown":
+        return None
+    return value
 
 
 def _to_float(value) -> float | None:

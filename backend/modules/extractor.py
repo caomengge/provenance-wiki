@@ -29,7 +29,7 @@ Analyze this document image carefully and extract ALL provenance-related informa
 Return ONLY a valid JSON object with this exact structure (no other text before or after):
 {
   "title": "a short descriptive title for this document (e.g., 'Sale receipt, Sotheby's London, 1938')",
-  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if known, otherwise null",
+  "date_depicted": "a date EXPLICITLY written in the document (e.g., a printed date, handwritten date, postmark), ISO format YYYY-MM-DD; if no date is explicitly written anywhere in the document use the string \"date unknown\" — do NOT infer or guess from style, content, or context",
   "date_range_start": "earliest date this document could relate to, YYYY-MM-DD or null",
   "date_range_end": "latest date this document could relate to, YYYY-MM-DD or null",
   "location": "primary location mentioned or associated with this document",
@@ -68,7 +68,8 @@ Critical rules:
 3. If multiple transactions are described, list each as a separate object in the transactions array
 4. tags should include: era/decade, document type, geographic region, transaction type, and any distinctive features
 5. If a field has no applicable information, use null (not empty string)
-6. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
+6. Return ONLY valid JSON — no markdown, no explanation, no code fences
+7. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
 
 
 # ── Multi-page extraction prompt ─────────────────────────────────────────────
@@ -78,7 +79,7 @@ MULTI_PAGE_EXTRACTION_PROMPT = """You are an expert museum archivist and provena
 Return ONLY a valid JSON object with this exact structure (no other text before or after):
 {{
   "title": "a short descriptive title for this document",
-  "date_depicted": "specific date shown or discussed in document, ISO format YYYY-MM-DD if known, otherwise null",
+  "date_depicted": "a date EXPLICITLY written in the document (e.g., a printed date, handwritten date, postmark), ISO format YYYY-MM-DD; if no date is explicitly written anywhere in the document use the string \"date unknown\" — do NOT infer or guess from style, content, or context",
   "date_range_start": "earliest date this document could relate to, YYYY-MM-DD or null",
   "date_range_end": "latest date this document could relate to, YYYY-MM-DD or null",
   "location": "primary location mentioned or associated with this document",
@@ -115,7 +116,8 @@ Critical rules:
 1. Preserve ALL non-English text EXACTLY as written — do not translate
 2. Extract EVERY person, institution, and artwork mentioned across all pages
 3. The transcription must cover all pages in order, separated by [Page N] markers
-4. Return ONLY valid JSON — no markdown, no explanation, no code fences"""
+4. Return ONLY valid JSON — no markdown, no explanation, no code fences
+5. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
 
 
 # ── Main extraction function ──────────────────────────────────────────────────
@@ -147,7 +149,7 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[
                     {
                         "role": "user",

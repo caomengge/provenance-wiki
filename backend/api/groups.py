@@ -15,6 +15,7 @@ import json
 import logging
 
 from flask import Blueprint, abort, jsonify, request
+from modules.ingestor import _normalize_date
 
 bp = Blueprint("groups", __name__)
 logger = logging.getLogger(__name__)
@@ -90,7 +91,7 @@ def create_group():
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 title or extracted.get("title"),
-                extracted.get("date_depicted"),
+                _normalize_date(extracted.get("date_depicted")),
                 extracted.get("date_range_start"),
                 extracted.get("date_range_end"),
                 extracted.get("location"),
@@ -346,6 +347,58 @@ def delete_group(group_id):
     return jsonify({"ok": True, "deleted": group_id})
 
 
+# ── Group–entity associations ─────────────────────────────────────────────────
+
+@bp.route("/api/groups/<int:group_id>/entities", methods=["POST"])
+def add_group_entity(group_id):
+    _, _, _, _, _, get_db, _, row_to_dict, upsert_entity, _ = _get_deps()
+
+    data  = request.get_json(silent=True) or {}
+    name  = data.get("name", "").strip()
+    type_ = data.get("type", "unknown")
+    role  = data.get("role", "").strip() or None
+
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    allowed_types = {"person", "object", "institution", "unknown"}
+    if type_ not in allowed_types:
+        type_ = "unknown"
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+            abort(404)
+
+        entity_id = upsert_entity(conn, name, type_)
+        if not entity_id:
+            return jsonify({"error": "Failed to create entity"}), 500
+
+        conn.execute(
+            "INSERT OR IGNORE INTO group_entities (group_id, entity_id, role) VALUES (?,?,?)",
+            (group_id, entity_id, role),
+        )
+        entity = conn.execute(
+            "SELECT id, name, type FROM entities WHERE id=?", (entity_id,)
+        ).fetchone()
+
+    return jsonify({"ok": True, "entity": row_to_dict(entity), "role": role}), 201
+
+
+@bp.route("/api/groups/<int:group_id>/entities/<int:entity_id>", methods=["DELETE"])
+def remove_group_entity(group_id, entity_id):
+    _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM group_entities WHERE group_id=? AND entity_id=?",
+            (group_id, entity_id),
+        )
+        if cur.rowcount == 0:
+            abort(404)
+
+    return jsonify({"ok": True})
+
+
 # ── Reorder pages ─────────────────────────────────────────────────────────────
 
 @bp.route("/api/groups/<int:group_id>/pages", methods=["PATCH"])
@@ -412,7 +465,7 @@ def re_extract_group(group_id):
                WHERE id=?""",
             (
                 extracted.get("title"),
-                extracted.get("date_depicted"), extracted.get("date_range_start"),
+                _normalize_date(extracted.get("date_depicted")), extracted.get("date_range_start"),
                 extracted.get("date_range_end"), extracted.get("location"),
                 extracted.get("medium"), extracted.get("dimensions"),
                 extracted.get("description"), extracted.get("language"),
