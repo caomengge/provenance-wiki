@@ -56,7 +56,7 @@ def list_entities():
                        (SELECT COUNT(DISTINCT de.document_id)
                         FROM document_entities de
                         JOIN documents d ON d.id = de.document_id
-                        WHERE de.entity_id = e.id AND d.group_id IS NULL AND d.is_trashed = 0
+                        WHERE de.entity_id = e.id AND d.is_trashed = 0
                        ) +
                        (SELECT COUNT(DISTINCT ge.group_id)
                         FROM group_entities ge
@@ -165,7 +165,7 @@ def entity_documents(entity_id):
         doc_count = conn.execute(
             """SELECT COUNT(*) as cnt FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0""",
+               WHERE de.entity_id = ? AND d.is_trashed = 0""",
             (entity_id,)
         ).fetchone()["cnt"]
 
