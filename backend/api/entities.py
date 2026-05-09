@@ -98,7 +98,7 @@ def get_entity(entity_id):
                       'document' as record_type
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0
+               WHERE de.entity_id = ? AND d.is_trashed = 0
                ORDER BY d.date_depicted NULLS LAST
                LIMIT 50""",
             (entity_id,)
@@ -184,7 +184,7 @@ def entity_documents(entity_id):
                       'document' as record_type
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ? AND d.group_id IS NULL AND d.is_trashed = 0
+               WHERE de.entity_id = ? AND d.is_trashed = 0
                ORDER BY d.date_depicted NULLS LAST, d.created_at""",
             (entity_id,)
         ).fetchall()
