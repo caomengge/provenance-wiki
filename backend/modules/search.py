@@ -301,9 +301,7 @@ def _filter_only_search(page, per_page, offset, tag_ids, entity_id, source_archi
     """Return documents and groups matching filters with no FTS query required."""
     from modules.db import get_db
 
-    # Documents: restrict to standalone (not inside a group) to avoid duplication
     doc_joins, doc_wheres, doc_params = _build_filters(tag_ids, entity_id, source_archive)
-    doc_wheres = doc_wheres + ["d.group_id IS NULL"]
     doc_where_clause = " AND ".join(doc_wheres)
 
     # Groups: build parallel filters against document_groups
