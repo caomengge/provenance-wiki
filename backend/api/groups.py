@@ -395,6 +395,12 @@ def remove_group_entity(group_id, entity_id):
         )
         if cur.rowcount == 0:
             abort(404)
+        conn.execute(
+            """DELETE FROM entities WHERE id=?
+               AND id NOT IN (SELECT entity_id FROM document_entities)
+               AND id NOT IN (SELECT entity_id FROM group_entities)""",
+            (entity_id,),
+        )
 
     return jsonify({"ok": True})
 
