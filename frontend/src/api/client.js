@@ -80,6 +80,12 @@ const api = {
   removeDocumentEntity: (docId, entityId) =>
     request('DELETE', `/api/documents/${docId}/entities/${entityId}`),
 
+  addGroupEntity: (groupId, name, type, role) =>
+    request('POST', `/api/groups/${groupId}/entities`, { name, type, role }),
+
+  removeGroupEntity: (groupId, entityId) =>
+    request('DELETE', `/api/groups/${groupId}/entities/${entityId}`),
+
   // ── Entities ─────────────────────────────────────────────────────────────
   getEntities: (params = {}) =>
     request('GET', '/api/entities?' + new URLSearchParams(params)),
