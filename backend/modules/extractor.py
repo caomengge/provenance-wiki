@@ -147,7 +147,7 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-6",
-                max_tokens=4096,
+                max_tokens=8192,
                 messages=[
                     {
                         "role": "user",
