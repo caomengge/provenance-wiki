@@ -83,6 +83,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
     from config import SUPPORTED_EXTS
     from modules.db import get_db, document_exists_by_sha256, upsert_entity, get_or_create_tag
     from modules.extractor import extract_from_image, generate_text_embedding
+    from modules.thumbnails import ensure_thumbnail
 
     try:
         _emit({"type": "start", "message": "Scanning photos directory…"})
@@ -148,6 +149,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                                     extract_from_image, generate_text_embedding,
                                     source_archive=source_archive,
                                     existing_id=existing_id)
+                    ensure_thumbnail(photo_path, sha)
                     processed += 1
                     _emit({
                         "type":      "done_file",

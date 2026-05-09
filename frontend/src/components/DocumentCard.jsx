@@ -44,8 +44,8 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
   const title  = doc.title || doc.filename || (isGroup ? `Group #${doc.id}` : `Document #${doc.id}`)
   const date   = doc.date_depicted || ''
   const imgUrl = isGroup && doc.first_page_id
-    ? api.getDocumentImageUrl(doc.first_page_id)
-    : api.getDocumentImageUrl(doc.id)
+    ? api.getDocumentThumbnailUrl(doc.first_page_id)
+    : api.getDocumentThumbnailUrl(doc.id)
   const href   = detailUrl
 
   // ── List view ──────────────────────────────────────────────────────────────

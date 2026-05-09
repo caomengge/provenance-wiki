@@ -229,7 +229,7 @@ export default function GroupDetail() {
             >
               <div style={{ position: 'relative' }}>
                 <img
-                  src={`${api.getDocumentImageUrl(page.id)}?v=${imgCacheBust}`}
+                  src={`${api.getDocumentThumbnailUrl(page.id)}?v=${imgCacheBust}`}
                   alt={`Page ${idx + 1}`}
                   style={{
                     width: '80px', height: '60px', objectFit: 'cover',
