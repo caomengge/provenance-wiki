@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 
@@ -106,14 +106,17 @@ export default function Timeline() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
   const [filterMode, setFilterMode] = useState('all')  // 'all' | 'transactions' | 'key'
+  const [filterEntity, setFilterEntity] = useState('')
+  const [entities, setEntities] = useState([])
   const navigate = useNavigate()
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
     try {
       const params = {}
-      if (dateFrom) params.date_from = dateFrom
-      if (dateTo)   params.date_to   = dateTo
+      if (dateFrom)     params.date_from  = dateFrom
+      if (dateTo)       params.date_to    = dateTo
+      if (filterEntity) params.entity_id  = filterEntity
       const res = await api.getTimeline(params)
       setData(res)
     } catch (err) {
@@ -121,9 +124,13 @@ export default function Timeline() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [dateFrom, dateTo, filterEntity])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    api.getEntities({ per_page: 500, sort: 'name' }).then(r => setEntities(r.entities || [])).catch(() => {})
+  }, [])
 
   const events = data?.dated_events || []
 
@@ -171,6 +178,16 @@ export default function Timeline() {
             <label style={{ display: 'inline', marginRight: '0.4rem' }}>To</label>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 'auto', fontSize: '0.88rem' }} />
           </div>
+          <select
+            value={filterEntity}
+            onChange={e => setFilterEntity(e.target.value)}
+            style={{ fontSize: '0.88rem', maxWidth: '220px' }}
+          >
+            <option value="">All entities</option>
+            {entities.map(e => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
           <button className="btn btn-primary" onClick={load}>Apply</button>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem' }}>
