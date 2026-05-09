@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import EntityCombobox from '../components/EntityCombobox'
 
 function TimelineEvent({ event, onDocClick }) {
   const isKey = event.is_key_evidence
@@ -107,7 +108,6 @@ export default function Timeline() {
   const [dateTo, setDateTo]     = useState('')
   const [filterMode, setFilterMode] = useState('all')  // 'all' | 'transactions' | 'key'
   const [filterEntity, setFilterEntity] = useState('')
-  const [entities, setEntities] = useState([])
   const navigate = useNavigate()
 
   const load = useCallback(async () => {
@@ -127,10 +127,6 @@ export default function Timeline() {
   }, [dateFrom, dateTo, filterEntity])
 
   useEffect(() => { load() }, [load])
-
-  useEffect(() => {
-    api.getEntities({ per_page: 500, sort: 'name' }).then(r => setEntities(r.entities || [])).catch(() => {})
-  }, [])
 
   const events = data?.dated_events || []
 
@@ -178,16 +174,12 @@ export default function Timeline() {
             <label style={{ display: 'inline', marginRight: '0.4rem' }}>To</label>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ width: 'auto', fontSize: '0.88rem' }} />
           </div>
-          <select
+          <EntityCombobox
             value={filterEntity}
-            onChange={e => setFilterEntity(e.target.value)}
-            style={{ fontSize: '0.88rem', maxWidth: '220px' }}
-          >
-            <option value="">All entities</option>
-            {entities.map(e => (
-              <option key={e.id} value={e.id}>{e.name}</option>
-            ))}
-          </select>
+            onChange={setFilterEntity}
+            placeholder="All entities"
+            style={{ minWidth: '220px', fontSize: '0.88rem' }}
+          />
           <button className="btn btn-primary" onClick={load}>Apply</button>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem' }}>

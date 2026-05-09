@@ -152,7 +152,7 @@ export default function DocPreviewPanel({ docId, onClose }) {
             <>
               {/* Image */}
               <img
-                src={api.getDocumentImageUrl(docId)}
+                src={api.getDocumentThumbnailUrl(docId)}
                 alt={doc.title || doc.filename}
                 style={{
                   width:        '100%',

@@ -38,6 +38,9 @@ const api = {
   getDocumentImageUrl: (id) =>
     `/api/documents/${id}/image`,
 
+  getDocumentThumbnailUrl: (id) =>
+    `/api/documents/${id}/thumbnail`,
+
   rotateDocument: (id, direction) =>
     request('POST', `/api/documents/${id}/rotate`, { direction }),
 

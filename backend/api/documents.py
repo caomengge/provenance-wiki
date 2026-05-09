@@ -29,6 +29,15 @@ def _get_deps():
     return PHOTOS_DIR, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, get_db, rows_to_list, row_to_dict
 
 
+def _add_image_cache_headers(response, etag: str | None = None):
+    """Apply Cache-Control + ETag so browsers can skip refetching unchanged images."""
+    from config import IMAGE_CACHE_SECONDS
+    response.headers["Cache-Control"] = f"public, max-age={IMAGE_CACHE_SECONDS}"
+    if etag:
+        response.set_etag(etag)
+    return response
+
+
 # ── List / filter ─────────────────────────────────────────────────────────────
 
 @bp.route("/api/documents", methods=["GET"])
@@ -127,12 +136,21 @@ def get_document(doc_id):
     PHOTOS_DIR, _, _, get_db, rows_to_list, row_to_dict = _get_deps()
 
     with get_db() as conn:
-        doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+        # Explicit column list — avoids shipping embedding_json (~10-30KB JSON
+        # vector) and raw_claude_response (often >5KB) on every detail request.
+        doc = conn.execute(
+            """SELECT id, filename, sha256, title, date_depicted, date_range_start,
+                      date_range_end, location, medium, dimensions, description,
+                      language, transcription, annotation, is_key_evidence,
+                      is_trashed, source_archive, group_id, page_number,
+                      created_at, updated_at
+               FROM documents WHERE id=?""",
+            (doc_id,)
+        ).fetchone()
         if not doc:
             abort(404)
 
         doc = row_to_dict(doc)
-        doc.pop("embedding_json", None)   # strip internal field
 
         # Enrich with related data
         doc["entities"] = rows_to_list(conn.execute(
@@ -172,7 +190,7 @@ def get_document_image(doc_id):
     PHOTOS_DIR, _, _, get_db, _, row_to_dict = _get_deps()
 
     with get_db() as conn:
-        doc = conn.execute("SELECT filename FROM documents WHERE id=?", (doc_id,)).fetchone()
+        doc = conn.execute("SELECT filename, sha256 FROM documents WHERE id=?", (doc_id,)).fetchone()
     if not doc:
         abort(404)
 
@@ -181,7 +199,38 @@ def get_document_image(doc_id):
         abort(404)
 
     mime, _ = mimetypes.guess_type(str(image_path))
-    return send_file(str(image_path), mimetype=mime or "image/jpeg")
+    response = send_file(str(image_path), mimetype=mime or "image/jpeg",
+                         conditional=True, etag=doc["sha256"])
+    return _add_image_cache_headers(response, etag=doc["sha256"])
+
+
+@bp.route("/api/documents/<int:doc_id>/thumbnail", methods=["GET"])
+def get_document_thumbnail(doc_id):
+    """Serve a small cached thumbnail. Generated on demand for older docs."""
+    PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
+    from modules.thumbnails import ensure_thumbnail
+
+    with get_db() as conn:
+        doc = conn.execute(
+            "SELECT filename, sha256 FROM documents WHERE id=?", (doc_id,)
+        ).fetchone()
+    if not doc:
+        abort(404)
+
+    source_path = PHOTOS_DIR / doc["filename"]
+    thumb = ensure_thumbnail(source_path, doc["sha256"])
+    if thumb is None or not thumb.exists():
+        # Fall back to the full image if thumbnail generation failed
+        if not source_path.exists():
+            abort(404)
+        mime, _ = mimetypes.guess_type(str(source_path))
+        response = send_file(str(source_path), mimetype=mime or "image/jpeg",
+                             conditional=True, etag=doc["sha256"])
+        return _add_image_cache_headers(response, etag=doc["sha256"])
+
+    response = send_file(str(thumb), mimetype="image/jpeg",
+                         conditional=True, etag=doc["sha256"])
+    return _add_image_cache_headers(response, etag=doc["sha256"])
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -254,12 +303,13 @@ def delete_document(doc_id):
 
     with get_db() as conn:
         doc = conn.execute(
-            "SELECT filename FROM documents WHERE id=?", (doc_id,)
+            "SELECT filename, sha256 FROM documents WHERE id=?", (doc_id,)
         ).fetchone()
         if not doc:
             abort(404)
 
         filename = doc["filename"]
+        sha256   = doc["sha256"]
 
         # Delete DB record — CASCADE removes document_entities, transactions, links, document_tags
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
@@ -283,6 +333,10 @@ def delete_document(doc_id):
         photo_path.unlink(missing_ok=True)
     except Exception:
         pass
+
+    # Drop the cached thumbnail too
+    from modules.thumbnails import delete_thumbnail
+    delete_thumbnail(sha256)
 
     return jsonify({"ok": True, "deleted": doc_id})
 
@@ -421,10 +475,11 @@ def rotate_document_image(doc_id):
 
     with get_db() as conn:
         doc = conn.execute(
-            "SELECT filename FROM documents WHERE id=?", (doc_id,)
+            "SELECT filename, sha256 FROM documents WHERE id=?", (doc_id,)
         ).fetchone()
         if not doc:
             abort(404)
+        old_sha = doc["sha256"]
 
     image_path = PHOTOS_DIR / doc["filename"]
     if not image_path.exists():
@@ -446,6 +501,11 @@ def rotate_document_image(doc_id):
             "UPDATE documents SET sha256=?, updated_at=datetime('now') WHERE id=?",
             (new_sha, doc_id)
         )
+
+    # Drop the old thumbnail and pre-build the new one so the gallery refreshes fast
+    from modules.thumbnails import delete_thumbnail, ensure_thumbnail
+    delete_thumbnail(old_sha)
+    ensure_thumbnail(image_path, new_sha)
 
     return jsonify({"ok": True})
 

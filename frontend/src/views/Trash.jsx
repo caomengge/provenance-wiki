@@ -76,7 +76,7 @@ export default function Trash() {
             {docs.map(doc => {
               const title   = doc.title || doc.filename || `Document #${doc.id}`
               const date    = doc.date_depicted || doc.date_range_start || ''
-              const imgUrl  = api.getDocumentImageUrl(doc.id)
+              const imgUrl  = api.getDocumentThumbnailUrl(doc.id)
               const busy    = actionLoading === doc.id
               const isConfirming = confirmDeleteId === doc.id
 

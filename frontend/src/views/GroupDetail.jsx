@@ -6,11 +6,13 @@ import AnnotationPanel from '../components/AnnotationPanel'
 import TagManager from '../components/TagManager'
 import InlineEdit from '../components/InlineEdit'
 import EvidenceFlag from '../components/EvidenceFlag'
+import { useJobStatus } from '../JobStatus'
 import TransactionEditor from '../components/TransactionEditor'
 
 export default function GroupDetail() {
   const { id }     = useParams()
   const navigate   = useNavigate()
+  const { setStatus } = useJobStatus()
   const [group, setGroup]       = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -103,10 +105,15 @@ export default function GroupDetail() {
   const handleReExtract = async () => {
     if (!window.confirm(`Re-extract all ${pageOrder.length} pages? This will overwrite title, description, entities, transactions, and tags. Your annotation will be preserved.`)) return
     setReExtracting(true)
+    setStatus({ message: `Re-extracting group #${id} (${pageOrder.length} pages)…`, busy: true })
     try {
       await api.reExtractGroup(id)
       await load()
+      setStatus({ message: `Done: re-extracted group #${id}`, busy: false })
+      setTimeout(() => setStatus({ message: '', busy: false }), 5000)
     } catch (err) {
+      setStatus({ message: `Failed to re-extract: ${err.message}`, busy: false })
+      setTimeout(() => setStatus({ message: '', busy: false }), 8000)
       alert(err.message)
     } finally {
       setReExtracting(false)
@@ -229,7 +236,7 @@ export default function GroupDetail() {
             >
               <div style={{ position: 'relative' }}>
                 <img
-                  src={`${api.getDocumentImageUrl(page.id)}?v=${imgCacheBust}`}
+                  src={`${api.getDocumentThumbnailUrl(page.id)}?v=${imgCacheBust}`}
                   alt={`Page ${idx + 1}`}
                   style={{
                     width: '80px', height: '60px', objectFit: 'cover',

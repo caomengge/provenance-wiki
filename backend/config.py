@@ -14,10 +14,16 @@ ROOT_DIR = Path(__file__).parent.parent
 load_dotenv(ROOT_DIR / ".env")
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-DATA_DIR   = ROOT_DIR / "data"
-PHOTOS_DIR = ROOT_DIR / "photos"
-DIST_DIR   = ROOT_DIR / "dist"
-DB_PATH    = DATA_DIR / "provenance.db"
+DATA_DIR       = ROOT_DIR / "data"
+PHOTOS_DIR     = ROOT_DIR / "photos"
+THUMBNAILS_DIR = DATA_DIR / "thumbnails"
+DIST_DIR       = ROOT_DIR / "dist"
+DB_PATH        = DATA_DIR / "provenance.db"
+
+# ── Thumbnails ────────────────────────────────────────────────────────────────
+THUMBNAIL_MAX_DIM = 480           # longest edge in pixels for cached thumbnails
+THUMBNAIL_QUALITY = 82            # JPEG quality for thumbnails
+IMAGE_CACHE_SECONDS = 3600        # browser cache lifetime for image responses
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -28,6 +34,7 @@ REASONING_MODEL  = "claude-sonnet-4-6"
 
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 INGEST_BATCH_SIZE    = 10         # photos processed per Claude API call batch
+INGEST_WORKERS       = 4          # concurrent workers for parallel ingestion
 INGEST_MAX_TOKENS    = 4096       # max output tokens for extraction prompt
 SUPPORTED_EXTS       = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 MULTIPAGE_MAX_PAGES  = 50         # max pages per document group
@@ -52,5 +59,6 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 # ── MCP ───────────────────────────────────────────────────────────────────────
 MCP_PORT = 5001
 
-# Ensure data directory exists
+# Ensure data directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)

@@ -145,7 +145,7 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
     media_type     = "image/jpeg" if image_bytes is not original_bytes else _get_media_type(image_path)
 
     last_error = None
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             response = client.messages.create(
                 model="claude-sonnet-4-6",
@@ -187,6 +187,16 @@ def extract_from_image(image_path: Path, api_key: str) -> dict:
             logger.warning("Attempt %d: JSON parse error for %s: %s", attempt + 1, image_path.name, exc)
             last_error = exc
             time.sleep(2 ** attempt)
+
+        except anthropic.RateLimitError as exc:
+            # Honour the server's retry-after when present; otherwise back off
+            # more aggressively than for generic errors since hammering a
+            # rate-limited endpoint won't help.
+            retry_after = _retry_after_seconds(exc) or (5 * (2 ** attempt))
+            logger.warning("Attempt %d: rate limited on %s — sleeping %.1fs",
+                           attempt + 1, image_path.name, retry_after)
+            last_error = exc
+            time.sleep(retry_after)
 
         except anthropic.APIError as exc:
             logger.warning("Attempt %d: API error for %s: %s", attempt + 1, image_path.name, exc)
@@ -315,6 +325,64 @@ def _prepare_image(path: Path, raw: bytes) -> bytes:
             path.name, img.width, img.height, len(data),
         )
         return data
+
+
+def synthesize_group_text(pages_summary: list[dict], api_key: str) -> dict | None:
+    """
+    Text-only Claude call: given per-page summaries, return a unified
+    {title, description} for the group. No images sent — fast and cheap
+    compared to a vision re-extraction. Returns None if the call fails;
+    callers should fall back to merge defaults.
+    """
+    if not api_key or not pages_summary:
+        return None
+
+    prompt = (
+        f"You are an expert museum archivist. Below are per-page summaries of a "
+        f"{len(pages_summary)}-page document. Produce a single unified title and "
+        "description for the document as a whole, treating all pages as one item.\n\n"
+        f"Pages:\n{json.dumps(pages_summary, ensure_ascii=False, indent=2)}\n\n"
+        "Return ONLY a valid JSON object — no markdown, no code fences:\n"
+        "{\n"
+        '  "title": "short descriptive title for the whole document",\n'
+        '  "description": "3-5 sentences describing what the document shows '
+        'across all pages and its provenance significance"\n'
+        "}"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```", 2)[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.rsplit("```", 1)[0].strip()
+        result = json.loads(text)
+        if isinstance(result, dict) and result.get("title") and result.get("description"):
+            return {"title": result["title"], "description": result["description"]}
+    except Exception:
+        logger.exception("Text-only group synthesis failed")
+    return None
+
+
+def _retry_after_seconds(exc) -> float | None:
+    """Pull the `retry-after` header from a RateLimitError if available."""
+    try:
+        response = getattr(exc, "response", None)
+        if response is None:
+            return None
+        value = response.headers.get("retry-after") or response.headers.get("Retry-After")
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
 
 
 def _get_media_type(path: Path) -> str:

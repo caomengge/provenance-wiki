@@ -61,7 +61,10 @@ body {
   margin-left: var(--sidebar-w);
   min-height: 100vh;
   background: var(--cream-bg);
-  overflow-x: hidden;
+  /* `overflow-x: hidden` here would create a scroll container that
+     breaks `position: sticky` on descendants. `clip` prevents the same
+     horizontal overflow without becoming a scroll container. */
+  overflow-x: clip;
 }
 
 /* ── Typography ─────────────────────────────────────────────────────────── */
@@ -92,6 +95,10 @@ a:hover { color: var(--gold-dark); }
   padding: 2rem 2.5rem 1rem;
   border-bottom: 1px solid var(--border);
   background: var(--cream-light);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
 .page-header h1 {
@@ -351,4 +358,9 @@ mark {
   border: none;
   border-top: 1px solid var(--border);
   margin: 1.5rem 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }

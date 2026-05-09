@@ -208,9 +208,7 @@ export default function DocumentDetail() {
             }}
           />
           <button className="btn btn-ghost" onClick={() => setShowLink(true)}>⛓ Link Document</button>
-          {doc.raw_claude_response && (
-            <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>📄 Transcription</button>
-          )}
+          <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>📄 Transcription</button>
           <a
             href="#"
             className="btn btn-ghost"
