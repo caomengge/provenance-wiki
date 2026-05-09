@@ -87,7 +87,7 @@ def get_timeline(
         doc_sql, doc_params = _build_doc_query(entity_id, tag_id, date_from, date_to, doc_ids)
         for row in conn.execute(doc_sql, doc_params).fetchall():
             d = dict(row)
-            eff_date = d.get("date_depicted") or d.get("date_range_start")
+            eff_date = d.get("date_depicted")
             entity_names = [e.strip() for e in (d.get("entity_names") or "").split(",") if e.strip()]
 
             event = {
@@ -111,7 +111,7 @@ def get_timeline(
         grp_doc_sql, grp_doc_params = _build_group_doc_query(date_from, date_to)
         for row in conn.execute(grp_doc_sql, grp_doc_params).fetchall():
             g = dict(row)
-            eff_date = g.get("date_depicted") or g.get("date_range_start")
+            eff_date = g.get("date_depicted")
             entity_names = [e.strip() for e in (g.get("entity_names") or "").split(",") if e.strip()]
 
             event = {
