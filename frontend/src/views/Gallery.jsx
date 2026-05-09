@@ -150,7 +150,10 @@ export default function Gallery({ onStatsUpdate }) {
 
   return (
     <div>
-      <div className="page-header">
+      <div
+        className="page-header"
+        style={{ position: 'sticky', top: 0, zIndex: 50, boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h1>Document Gallery</h1>
