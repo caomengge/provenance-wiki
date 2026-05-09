@@ -75,6 +75,19 @@ export default function EntityCombobox({ value, onChange, placeholder = 'All ent
     if (results.length === 0) runSearch(query)
   }
 
+  // If the user has typed but the popover is closed (e.g. they tabbed away
+  // and back), reopen it on next keystroke.
+  const handleBlur = () => {
+    // Delay so click handlers on results fire first
+    setTimeout(() => {
+      // If a click on a result already closed/handled this, do nothing.
+      // Otherwise: if the user typed text but never picked a result, the
+      // value stays empty — so wipe the stray query so the input shows the
+      // currently-applied filter (or empty) instead of dangling text.
+      if (!value) setQuery('')
+    }, 150)
+  }
+
   const handleChange = (e) => {
     const v = e.target.value
     setQuery(v)
@@ -107,9 +120,13 @@ export default function EntityCombobox({ value, onChange, placeholder = 'All ent
       e.preventDefault()
       setActiveIdx(i => Math.max(-1, i - 1))
     } else if (e.key === 'Enter') {
-      if (open && activeIdx >= 0 && results[activeIdx]) {
+      // Enter on the first result (or the highlighted one) picks it. Stops
+      // the form's default Apply submit so users can pick a result without
+      // accidentally submitting the surrounding date filter form.
+      const target = activeIdx >= 0 ? results[activeIdx] : results[0]
+      if (open && target) {
         e.preventDefault()
-        select(results[activeIdx])
+        select(target)
       }
     } else if (e.key === 'Escape') {
       setOpen(false)
@@ -128,6 +145,7 @@ export default function EntityCombobox({ value, onChange, placeholder = 'All ent
           value={displayValue}
           placeholder={placeholder}
           onFocus={handleFocus}
+          onBlur={handleBlur}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           role="combobox"

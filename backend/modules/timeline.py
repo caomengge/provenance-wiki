@@ -63,7 +63,7 @@ def get_timeline(
             })
 
         # ── Group transaction events ──────────────────────────────────────────
-        grp_txn_sql, grp_txn_params = _build_group_txn_query(date_from, date_to)
+        grp_txn_sql, grp_txn_params = _build_group_txn_query(entity_id, date_from, date_to)
         for row in conn.execute(grp_txn_sql, grp_txn_params).fetchall():
             t = dict(row)
             dated_events.append({
@@ -108,7 +108,7 @@ def get_timeline(
                 undated_events.append(event)
 
         # ── Group date events ─────────────────────────────────────────────────
-        grp_doc_sql, grp_doc_params = _build_group_doc_query(date_from, date_to)
+        grp_doc_sql, grp_doc_params = _build_group_doc_query(entity_id, date_from, date_to)
         for row in conn.execute(grp_doc_sql, grp_doc_params).fetchall():
             g = dict(row)
             eff_date = g.get("date_depicted")
@@ -223,25 +223,28 @@ def _build_doc_query(entity_id, tag_id, date_from, date_to, doc_ids):
     return sql, params
 
 
-def _build_group_txn_query(date_from, date_to):
+def _build_group_txn_query(entity_id, date_from, date_to):
     sql = """
         SELECT gt.*, g.title as group_title
         FROM group_transactions gt
         JOIN document_groups g ON g.id = gt.group_id
     """
-    wheres = ["g.is_trashed = 0", "gt.date IS NOT NULL"]
-    params = []
+    joins, wheres, params = [], ["g.is_trashed = 0", "gt.date IS NOT NULL"], []
+    if entity_id:
+        joins.append("JOIN group_entities ge ON ge.group_id = g.id AND ge.entity_id = ?")
+        params.append(entity_id)
     if date_from:
         wheres.append("gt.date >= ?")
         params.append(date_from)
     if date_to:
         wheres.append("gt.date <= ?")
         params.append(date_to)
+    sql += " " + " ".join(joins)
     sql += " WHERE " + " AND ".join(wheres) + " ORDER BY gt.date"
     return sql, params
 
 
-def _build_group_doc_query(date_from, date_to):
+def _build_group_doc_query(entity_id, date_from, date_to):
     sql = """
         SELECT g.id, g.title, g.date_depicted, g.date_range_start,
                g.location, g.medium, g.is_key_evidence,
@@ -252,6 +255,12 @@ def _build_group_doc_query(date_from, date_to):
     """
     wheres = ["g.is_trashed = 0"]
     params = []
+    if entity_id:
+        # Restrict to groups that have at least one row for this entity in the
+        # LEFT JOIN above; using the LEFT JOIN's column in WHERE effectively
+        # turns it into an INNER JOIN for matching rows only.
+        wheres.append("g.id IN (SELECT group_id FROM group_entities WHERE entity_id = ?)")
+        params.append(entity_id)
     eff_date_expr = "COALESCE(g.date_depicted, g.date_range_start)"
     if date_from:
         wheres.append(f"{eff_date_expr} >= ?")
