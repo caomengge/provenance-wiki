@@ -50,7 +50,7 @@ def create_group():
     with get_db() as conn:
         # Validate all docs exist and are not already grouped
         rows = conn.execute(
-            f"SELECT id, filename, group_id FROM documents WHERE id IN ({','.join('?' * len(doc_ids))})",
+            f"SELECT id, filename, group_id, source_archive FROM documents WHERE id IN ({','.join('?' * len(doc_ids))})",
             doc_ids
         ).fetchall()
 
@@ -63,6 +63,9 @@ def create_group():
 
         # Sort filenames lexicographically → natural page order
         pages_sorted = sorted(rows, key=lambda r: r["filename"])
+
+    source_archives = [r["source_archive"] for r in pages_sorted if r["source_archive"]]
+    inherited_source_archive = source_archives[0] if source_archives else None
 
     image_paths = [PHOTOS_DIR / r["filename"] for r in pages_sorted]
     missing = [str(p) for p in image_paths if not p.exists()]
@@ -103,7 +106,7 @@ def create_group():
                 json.dumps(extracted),
                 0,  # is_key_evidence — never set automatically; user flags manually
                 json.dumps(embedding) if embedding else None,
-                extracted.get("source_archive"),
+                inherited_source_archive,
             )
         )
         group_id = cur.lastrowid
