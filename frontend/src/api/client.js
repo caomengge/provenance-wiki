@@ -125,6 +125,25 @@ const api = {
   removeGroupTag: (groupId, tagId) =>
     request('DELETE', `/api/groups/${groupId}/tags/${tagId}`),
 
+  // ── Transactions ─────────────────────────────────────────────────────────
+  createTransaction: (docId, data) =>
+    request('POST', `/api/documents/${docId}/transactions`, data),
+
+  updateTransaction: (txnId, data) =>
+    request('PATCH', `/api/transactions/${txnId}`, data),
+
+  deleteTransaction: (txnId) =>
+    request('DELETE', `/api/transactions/${txnId}`),
+
+  createGroupTransaction: (groupId, data) =>
+    request('POST', `/api/groups/${groupId}/transactions`, data),
+
+  updateGroupTransaction: (txnId, data) =>
+    request('PATCH', `/api/group_transactions/${txnId}`, data),
+
+  deleteGroupTransaction: (txnId) =>
+    request('DELETE', `/api/group_transactions/${txnId}`),
+
   // ── Ingest ───────────────────────────────────────────────────────────────
   startIngest: (sourceArchive) =>
     request('POST', '/api/ingest', sourceArchive ? { source_archive: sourceArchive } : undefined),

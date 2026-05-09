@@ -54,9 +54,10 @@ def create_app() -> Flask:
     from api.qa_routes       import bp as qa_bp
     from api.export_routes   import bp as export_bp
     from api.groups          import bp as groups_bp
+    from api.transactions    import bp as transactions_bp
 
     for bp in [docs_bp, entities_bp, search_bp, ingest_bp,
-               timeline_bp, network_bp, qa_bp, export_bp, groups_bp]:
+               timeline_bp, network_bp, qa_bp, export_bp, groups_bp, transactions_bp]:
         app.register_blueprint(bp)
 
     # ── Stats endpoint ────────────────────────────────────────────────────────
