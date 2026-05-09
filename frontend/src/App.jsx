@@ -11,6 +11,7 @@ import Trash from './views/Trash'
 import Entities from './views/Entities'
 import GroupDetail from './views/GroupDetail'
 import QAPanel from './components/QAPanel'
+import { JobStatusProvider } from './JobStatus'
 import api from './api/client'
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <JobStatusProvider>
       <div className="app-layout">
         <Sidebar stats={stats} />
         <QAPanel isOpen={qaOpen} onClose={() => setQaOpen(false)} />
@@ -69,6 +71,7 @@ export default function App() {
           💬
         </button>
       </div>
+      </JobStatusProvider>
     </BrowserRouter>
   )
 }

@@ -352,3 +352,8 @@ mark {
   border-top: 1px solid var(--border);
   margin: 1.5rem 0;
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}

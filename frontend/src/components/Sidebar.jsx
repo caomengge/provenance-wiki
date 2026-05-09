@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import { useJobStatus } from '../JobStatus'
 
 const NAV = [
   { to: '/gallery',  icon: '▤', label: 'Gallery' },
@@ -107,6 +108,7 @@ export default function Sidebar({ stats }) {
   const [showArchive,     setShowArchive]     = useState(false)
   const [archiveSuggestions, setArchiveSuggestions] = useState([])
   const navigate = useNavigate()
+  const { status: jobStatus } = useJobStatus()
 
   // Load existing archive names for autocomplete once
   React.useEffect(() => {
@@ -275,6 +277,27 @@ export default function Sidebar({ stats }) {
         {ingestMsg && (
           <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: 'var(--text-light)', textAlign: 'center', lineBreak: 'anywhere' }}>
             {ingestMsg}
+          </div>
+        )}
+
+        {jobStatus.message && (
+          <div style={{
+            marginTop: '0.6rem',
+            padding: '0.4rem 0.5rem',
+            background: 'var(--navy-mid)',
+            border: '1px solid var(--navy-light)',
+            borderRadius: '3px',
+            fontSize: '0.72rem',
+            color: jobStatus.busy ? 'var(--gold)' : 'var(--cream-light)',
+            textAlign: 'center',
+            lineBreak: 'anywhere',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.4rem',
+          }}>
+            {jobStatus.busy && <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>}
+            <span>{jobStatus.message}</span>
           </div>
         )}
       </div>

@@ -17,6 +17,7 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import { useJobStatus } from '../JobStatus'
 
 const TAG_COLORS = [
   '#c9a84c','#8b3a2e','#2e5f8b','#2e8b57','#6b4c8b',
@@ -41,6 +42,7 @@ export default function BatchEditBar({
 }) {
   const count    = selectedIds.size
   const navigate = useNavigate()
+  const { setStatus } = useJobStatus()
 
   // Split composite keys (e.g. "d:123", "g:45") into doc and group id lists
   const docIds   = [...selectedIds].filter(k => typeof k === 'string' && k.startsWith('d:')).map(k => Number(k.slice(2)))
@@ -153,10 +155,15 @@ export default function BatchEditBar({
     }
     if (docIds.length < 2) return
     setGroupCreating(true)
+    setStatus({ message: `Grouping ${docIds.length} pages…`, busy: true })
     try {
       const result = await api.createGroup(docIds, groupTitle.trim() || undefined)
+      setStatus({ message: `Done: group #${result.group_id} created`, busy: false })
+      setTimeout(() => setStatus({ message: '', busy: false }), 5000)
       navigate(`/groups/${result.group_id}`)
     } catch (err) {
+      setStatus({ message: `Failed to group: ${err.message}`, busy: false })
+      setTimeout(() => setStatus({ message: '', busy: false }), 8000)
       alert(err.message)
       setGroupCreating(false)
     }
