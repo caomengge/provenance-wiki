@@ -61,7 +61,10 @@ body {
   margin-left: var(--sidebar-w);
   min-height: 100vh;
   background: var(--cream-bg);
-  overflow-x: hidden;
+  /* `overflow-x: hidden` here would create a scroll container that
+     breaks `position: sticky` on descendants. `clip` prevents the same
+     horizontal overflow without becoming a scroll container. */
+  overflow-x: clip;
 }
 
 /* ── Typography ─────────────────────────────────────────────────────────── */
