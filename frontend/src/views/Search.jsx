@@ -15,12 +15,10 @@ export default function Search() {
   const [hasSearched, setHasSearched] = useState(false)
 
   // Filter options
-  const [tags,          setTags]          = useState([])
-  const [filterTag,     setFilterTag]     = useState('')
-  const [entities,      setEntities]      = useState([])
-  const [filterEntity,  setFilterEntity]  = useState(searchParams.get('entity_id') || '')
-  const [archives,      setArchives]      = useState([])
-  const [filterArchive, setFilterArchive] = useState('')
+  const [filterEntity,     setFilterEntity]     = useState(searchParams.get('entity_id') || '')
+  const [filterEntityName, setFilterEntityName] = useState('')
+  const [archives,         setArchives]         = useState([])
+  const [filterArchive,    setFilterArchive]    = useState('')
 
   // Selection / batch-edit
   const [selectMode,   setSelectMode]   = useState(false)
@@ -31,18 +29,24 @@ export default function Search() {
 
   // Load filter option lists once
   useEffect(() => {
-    api.getTags().then(r => setTags(r.tags || [])).catch(() => {})
-    api.getEntities({ per_page: 500 }).then(r => setEntities(r.entities || [])).catch(() => {})
     api.getArchives().then(r => setArchives(r.archives || [])).catch(() => {})
   }, [])
 
+  // Fetch the entity name when filterEntity is set via URL (e.g. clicking an
+  // entity card elsewhere) so we can show it in the active-filter chip.
+  useEffect(() => {
+    if (!filterEntity) { setFilterEntityName(''); return }
+    api.getEntity(filterEntity)
+      .then(e => setFilterEntityName(e?.name || ''))
+      .catch(() => setFilterEntityName(''))
+  }, [filterEntity])
+
   const doSearch = useCallback(async (q, p = 1) => {
-    if (!q.trim() && !filterTag && !filterEntity && !filterArchive) return
+    if (!q.trim() && !filterEntity && !filterArchive) return
     setLoading(true)
     setHasSearched(true)
     try {
       const params = { q, mode, page: p, per_page: PER_PAGE }
-      if (filterTag)     params.tag_id         = filterTag
       if (filterEntity)  params.entity_id      = filterEntity
       if (filterArchive) params.source_archive = filterArchive
       const res = await api.search(params)
@@ -54,7 +58,7 @@ export default function Search() {
     } finally {
       setLoading(false)
     }
-  }, [mode, filterTag, filterEntity, filterArchive])
+  }, [mode, filterEntity, filterArchive])
 
   // Auto-run if URL has q or entity_id
   useEffect(() => {
@@ -67,12 +71,12 @@ export default function Search() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-run search whenever a filter dropdown changes
+  // Re-run search whenever an active filter changes
   useEffect(() => {
-    if (filterTag || filterEntity || filterArchive) {
+    if (filterEntity || filterArchive) {
       doSearch(query, 1)
     }
-  }, [filterTag, filterEntity, filterArchive, doSearch]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterEntity, filterArchive, doSearch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -129,9 +133,7 @@ export default function Search() {
 
   // Active filter labels for result summary
   const activeArchiveLabel = filterArchive || null
-  const activeEntityLabel  = filterEntity
-    ? (entities.find(e => String(e.id) === String(filterEntity))?.name || null)
-    : null
+  const activeEntityLabel  = filterEntity ? (filterEntityName || `#${filterEntity}`) : null
 
   return (
     <div>
@@ -184,21 +186,27 @@ export default function Search() {
               ))}
             </div>
 
-            <select value={filterTag} onChange={e => setFilterTag(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">All Tags</option>
-              {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-
             <select value={filterArchive} onChange={e => setFilterArchive(e.target.value)} style={{ width: 'auto' }}>
               <option value="">All Sources</option>
               <option value="__none__">— No Source</option>
               {archives.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
 
-            <select value={filterEntity} onChange={e => setFilterEntity(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">All Entities</option>
-              {entities.map(e => <option key={e.id} value={e.id}>{e.name} ({e.type})</option>)}
-            </select>
+            {filterEntity && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                background: 'var(--cream-bg)', border: '1px solid var(--border)',
+                borderRadius: '3px', padding: '0.25rem 0.5rem', fontSize: '0.85rem',
+              }}>
+                Entity: {filterEntityName || `#${filterEntity}`}
+                <button
+                  type="button"
+                  onClick={() => setFilterEntity('')}
+                  aria-label="Clear entity filter"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                >×</button>
+              </span>
+            )}
           </div>
         </form>
 
@@ -232,7 +240,7 @@ export default function Search() {
         ) : !hasSearched ? (
           <div className="empty-state">
             <h3>Enter a search query or select a filter above</h3>
-            <p>Search supports English, Chinese, German, French, and other languages. Try searching for a person's name, artwork title, auction house, or date. You can also browse by tag, source archive, or entity using the dropdowns.</p>
+            <p>Search supports English, Chinese, German, French, and other languages. Try searching for a person's name, artwork title, auction house, or date. You can also filter by source archive, or click an entity from the Entities page to filter by it.</p>
           </div>
         ) : results.length === 0 ? (
           <div className="empty-state">
