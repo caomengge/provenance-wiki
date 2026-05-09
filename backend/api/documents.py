@@ -136,12 +136,21 @@ def get_document(doc_id):
     PHOTOS_DIR, _, _, get_db, rows_to_list, row_to_dict = _get_deps()
 
     with get_db() as conn:
-        doc = conn.execute("SELECT * FROM documents WHERE id=?", (doc_id,)).fetchone()
+        # Explicit column list — avoids shipping embedding_json (~10-30KB JSON
+        # vector) and raw_claude_response (often >5KB) on every detail request.
+        doc = conn.execute(
+            """SELECT id, filename, sha256, title, date_depicted, date_range_start,
+                      date_range_end, location, medium, dimensions, description,
+                      language, transcription, annotation, is_key_evidence,
+                      is_trashed, source_archive, group_id, page_number,
+                      created_at, updated_at
+               FROM documents WHERE id=?""",
+            (doc_id,)
+        ).fetchone()
         if not doc:
             abort(404)
 
         doc = row_to_dict(doc)
-        doc.pop("embedding_json", None)   # strip internal field
 
         # Enrich with related data
         doc["entities"] = rows_to_list(conn.execute(

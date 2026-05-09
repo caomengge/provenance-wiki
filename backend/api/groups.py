@@ -277,14 +277,20 @@ def get_group(group_id):
     _, _, _, _, _, get_db, rows_to_list, row_to_dict, _, _ = _get_deps()
 
     with get_db() as conn:
+        # Explicit column list — skip embedding_json and raw_claude_response,
+        # neither of which the frontend uses but which together can be 30KB+.
         group = conn.execute(
-            "SELECT * FROM document_groups WHERE id=?", (group_id,)
+            """SELECT id, title, date_depicted, date_range_start, date_range_end,
+                      location, medium, dimensions, description, language,
+                      transcription, annotation, is_key_evidence, is_trashed,
+                      source_archive, created_at, updated_at
+               FROM document_groups WHERE id=?""",
+            (group_id,)
         ).fetchone()
         if not group:
             abort(404)
 
         group = row_to_dict(group)
-        group.pop("embedding_json", None)
 
         group["pages"] = rows_to_list(conn.execute(
             """SELECT id, filename, page_number, title, date_depicted, medium
