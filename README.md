@@ -104,7 +104,7 @@ Once you see `Starting Flask server on http://localhost:5100`, open your browser
 2. Watch the progress messages
 3. When done, the gallery will populate with your documents
 
-Each photo is sent to Claude for analysis. Processing takes a few seconds per photo. You can safely stop and restart — already-processed photos are skipped.
+Each photo is sent to Claude for analysis. Ingestion runs four photos in parallel by default (tunable via `INGEST_WORKERS` in `backend/config.py`); a 500-photo backlog typically finishes in ~25 minutes. You can safely stop and restart — already-processed photos are skipped, and any that previously failed are retried automatically.
 
 ---
 
@@ -132,23 +132,27 @@ Each photo is sent to Claude for analysis. Processing takes a few seconds per ph
 ## Features
 
 ### Gallery
-Browse all your documents in a grid or list. Filter by tag, date, or key evidence. Select multiple documents to export as a PDF dossier.
+Browse all your documents in a grid or list. Filter by source archive, entity (typeahead — type a few letters), or key evidence. The filter and action bar pins to the top while you scroll. Select multiple documents to export as a PDF dossier or to **group** them into a single multi-page document.
 
 ### Document Detail
 - View the full-resolution image (click to zoom)
 - See extracted entities, transactions, dates, and locations
+- Add and edit transactions inline
 - Add researcher annotations (auto-saved)
 - Toggle key evidence flag (★)
 - Manage tags with custom colors
 - Link related documents
 
+### Document Groups
+Select multiple pages in the Gallery and click **Group** to combine them into one multi-page document. Grouping merges the already-extracted page data and runs a tiny text-only Claude call to synthesize a unified title and description — no images re-uploaded, ~1–2 seconds. If the result reads poorly for a particular group, click **↺ Re-extract** on the group page to run a full vision re-extraction.
+
 ### Search
 - **Keyword search**: SQLite FTS5 with BM25 ranking, highlights matching terms
 - **Semantic search**: vector similarity over document embeddings
-- Filter by tag or entity
+- Filter by source archive; click an entity from the Entities page to filter results to that entity (chip with × to clear)
 
 ### Timeline
-Chronological view of all provenance events. Filter by date range. Export as PDF.
+Chronological view of all provenance events. Filter by date range or by entity (typeahead). Export as PDF.
 
 ### Network Graph
 Interactive force-directed graph showing relationships between documents, people, objects, and institutions. Click nodes to see details.
@@ -226,14 +230,27 @@ If the file doesn't exist, create it with this content (replace `/Users/yourname
 
 ---
 
+## Performance Notes
+
+The app is designed to stay responsive at ~500 documents on a laptop:
+
+- **Thumbnail cache** — gallery cards serve 480px JPEG thumbnails (~50 KB) instead of the full iPhone original (~5 MB). Generated on ingest, regenerated automatically on rotation, served with `Cache-Control` + `ETag` so the browser skips re-downloads.
+- **Parallel ingestion** — four concurrent Claude vision calls by default; tunable via `INGEST_WORKERS`. Honours `Retry-After` on rate-limit responses.
+- **Smart grouping** — page-merge instead of re-uploading images for a fresh vision call.
+- **Lean detail responses** — internal fields (`embedding_json`, `raw_claude_response`) stay in the database and are not shipped to the frontend on every detail load.
+- **Server-side entity search** — filter dropdowns query the database as you type instead of preloading every entity.
+
+---
+
 ## Data Storage
 
 All data is stored locally:
 - `photos/` — your original image files (never modified)
+- `data/thumbnails/` — generated JPEG thumbnails keyed by sha256 (regeneratable; safe to delete)
 - `data/provenance.db` — SQLite database with all extracted data
 - `data/mcp.log` — MCP server log
 
-To back up your research, copy the entire `DCADP_Provenance_wiki/` folder.
+To back up your research, copy the entire project folder. At minimum, back up `data/provenance.db` and `photos/`; thumbnails will rebuild on demand.
 
 ---
 
