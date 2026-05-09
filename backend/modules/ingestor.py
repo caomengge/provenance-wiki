@@ -17,6 +17,7 @@ import logging
 import queue
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Generator
 
@@ -78,9 +79,9 @@ def get_ingest_status() -> dict:
 # ── Worker ────────────────────────────────────────────────────────────────────
 
 def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archive: str = None):
-    """Background thread: scan, filter, and process photos."""
+    """Background coordinator: scan, filter, then process photos in a thread pool."""
     global _is_ingesting
-    from config import SUPPORTED_EXTS
+    from config import SUPPORTED_EXTS, INGEST_WORKERS
     from modules.db import get_db, document_exists_by_sha256, upsert_entity, get_or_create_tag
     from modules.extractor import extract_from_image, generate_text_embedding
     from modules.thumbnails import ensure_thumbnail
@@ -126,48 +127,54 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
             _emit({"type": "done", "processed": 0, "skipped": skipped, "errors": 0})
             return
 
-        # Process in batches
         processed = 0
         errors    = 0
+        completed = 0
+        total_pending = len(pending)
+        counter_lock  = threading.Lock()
 
-        for batch_start in range(0, len(pending), batch_size):
-            batch = pending[batch_start: batch_start + batch_size]
+        def _run_one(item):
+            photo_path, sha, existing_id = item
+            _emit({
+                "type": "processing",
+                "file": photo_path.name,
+            })
+            try:
+                _process_single(photo_path, sha, api_key, get_db,
+                                upsert_entity, get_or_create_tag,
+                                extract_from_image, generate_text_embedding,
+                                source_archive=source_archive,
+                                existing_id=existing_id)
+                ensure_thumbnail(photo_path, sha)
+                return ("ok", photo_path.name, None)
+            except Exception as exc:
+                logger.exception("Failed to process %s", photo_path.name)
+                return ("err", photo_path.name, str(exc))
 
-            for idx, (photo_path, sha, existing_id) in enumerate(batch):
-                global_idx = batch_start + idx
-                _emit({
-                    "type":     "processing",
-                    "file":     photo_path.name,
-                    "index":    global_idx + 1,
-                    "total":    len(pending),
-                    "percent":  round((global_idx / len(pending)) * 100),
-                })
-
-                try:
-                    _process_single(photo_path, sha, api_key, get_db,
-                                    upsert_entity, get_or_create_tag,
-                                    extract_from_image, generate_text_embedding,
-                                    source_archive=source_archive,
-                                    existing_id=existing_id)
-                    ensure_thumbnail(photo_path, sha)
-                    processed += 1
-                    _emit({
-                        "type":      "done_file",
-                        "file":      photo_path.name,
-                        "index":     global_idx + 1,
-                        "processed": processed,
-                    })
-                except Exception as exc:
-                    errors += 1
-                    logger.exception("Failed to process %s", photo_path.name)
-                    _emit({
-                        "type":    "error",
-                        "file":    photo_path.name,
-                        "message": str(exc),
-                    })
-
-                # Small delay to avoid hammering the API
-                time.sleep(0.5)
+        worker_count = max(1, INGEST_WORKERS)
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ingest") as pool:
+            futures = [pool.submit(_run_one, item) for item in pending]
+            for fut in as_completed(futures):
+                status, name, err = fut.result()
+                with counter_lock:
+                    completed += 1
+                    if status == "ok":
+                        processed += 1
+                        _emit({
+                            "type":      "done_file",
+                            "file":      name,
+                            "processed": processed,
+                            "completed": completed,
+                            "total":     total_pending,
+                            "percent":   round((completed / total_pending) * 100),
+                        })
+                    else:
+                        errors += 1
+                        _emit({
+                            "type":    "error",
+                            "file":    name,
+                            "message": err,
+                        })
 
         _emit({
             "type":      "done",

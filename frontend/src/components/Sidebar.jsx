@@ -135,8 +135,10 @@ export default function Sidebar({ stats }) {
             setIngestMsg(`Done: ${data.processed} processed`)
             setIngesting(false)
             evtSrc.close()
+          } else if (data.type === 'done_file') {
+            setIngestMsg(`${data.completed}/${data.total}: ${data.file}`)
           } else if (data.type === 'processing') {
-            setIngestMsg(`${data.index}/${data.total}: ${data.file}`)
+            setIngestMsg(`Processing ${data.file}…`)
           } else if (data.type === 'error') {
             setIngestMsg(`Error: ${data.message}`)
           }

@@ -264,10 +264,13 @@ END;
 def get_connection() -> sqlite3.Connection:
     """Open a SQLite connection with row_factory for dict-like access."""
     db_path = _get_db_path()
-    conn = sqlite3.connect(str(db_path))
+    # Wait up to 5 seconds for the writer lock instead of erroring immediately —
+    # required when ingestion workers and request handlers write concurrently.
+    conn = sqlite3.connect(str(db_path), timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
