@@ -298,11 +298,33 @@ def get_group(group_id):
             (group_id,)
         ).fetchall())
 
+        # Union of entities explicitly attached to the group AND entities from
+        # any child page. Deduped by entity_id, preferring the group-level
+        # role/context when both exist. source_page_id is set when the entity
+        # is reached via a child page only — useful for the UI to link back to
+        # the originating page.
         group["entities"] = rows_to_list(conn.execute(
-            """SELECT e.id, e.name, e.type, ge.role, ge.context
-               FROM group_entities ge JOIN entities e ON e.id = ge.entity_id
-               WHERE ge.group_id=?""",
-            (group_id,)
+            """SELECT e.id, e.name, e.type,
+                      ge.role  AS role,
+                      ge.context AS context,
+                      NULL AS source_page_id
+               FROM group_entities ge
+               JOIN entities e ON e.id = ge.entity_id
+               WHERE ge.group_id = ?
+
+               UNION ALL
+
+               SELECT e.id, e.name, e.type,
+                      de.role AS role,
+                      de.context AS context,
+                      d.id AS source_page_id
+               FROM documents d
+               JOIN document_entities de ON de.document_id = d.id
+               JOIN entities e ON e.id = de.entity_id
+               WHERE d.group_id = ? AND d.is_trashed = 0
+                 AND e.id NOT IN (SELECT entity_id FROM group_entities
+                                  WHERE group_id = ?)""",
+            (group_id, group_id, group_id)
         ).fetchall())
 
         group["transactions"] = rows_to_list(conn.execute(
