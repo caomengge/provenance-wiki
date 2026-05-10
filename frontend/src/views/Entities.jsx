@@ -150,8 +150,16 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
           )}
         </div>
         {mergeOpen && (
-          <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-            <div style={{ flex: 1, position: 'relative' }}>
+          <div style={{
+            marginTop: '0.5rem',
+            display: 'flex',
+            gap: '0.5rem',
+            alignItems: 'flex-start',
+            whiteSpace: 'normal',
+            minWidth: '360px',
+            width: '100%',
+          }}>
+            <div style={{ flex: 1, minWidth: '280px', position: 'relative' }}>
               <EntityNameAutocomplete
                 value={mergeTargetText}
                 onChange={(text) => {
@@ -167,6 +175,7 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
                   setMergeTargetType(e.type)
                 }}
                 placeholder="Search for target entity…"
+                style={{ width: '100%' }}
               />
               {mergeTarget && mergeTargetType && (
                 <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
