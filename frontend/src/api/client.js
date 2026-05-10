@@ -106,8 +106,16 @@ const api = {
     request('POST', '/api/entities/merge', { keep_id: keepId, discard_id: discardId }),
 
   // ── Search ───────────────────────────────────────────────────────────────
-  search: (params = {}) =>
-    request('GET', '/api/search?' + new URLSearchParams(params)),
+  search: (params = {}) => {
+    // URLSearchParams stringifies array values as comma-joined; the search
+    // backend wants repeated keys (e.g. tag_id=1&tag_id=2), so build it manually.
+    const sp = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (Array.isArray(v))     v.forEach(x => sp.append(k, x))
+      else if (v != null && v !== '') sp.append(k, v)
+    })
+    return request('GET', '/api/search?' + sp.toString())
+  },
 
   // ── Tags ─────────────────────────────────────────────────────────────────
   getTags: () =>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../api/client'
 
 const TAG_COLORS = [
@@ -92,7 +93,13 @@ export default function TagManager({ docId, initialTags = [], isGroup = false, g
             }}
           >
             <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: tag.color, display: 'inline-block' }} />
-            {tag.name}
+            <Link
+              to={`/search?tag_id=${tag.id}`}
+              title={`Find all documents tagged "${tag.name}"`}
+              style={{ color: 'inherit', textDecoration: 'none' }}
+            >
+              {tag.name}
+            </Link>
             <button
               onClick={() => removeTag(tag.id)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-muted)', fontSize: '0.9rem', lineHeight: 1 }}
