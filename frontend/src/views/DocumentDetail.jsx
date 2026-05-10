@@ -10,6 +10,7 @@ import InlineEdit from '../components/InlineEdit'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 import TranscriptionEditor from '../components/TranscriptionEditor'
+import { MEDIUM_CATEGORIES } from '../constants/medium'
 
 export default function DocumentDetail() {
   const { id }       = useParams()
@@ -180,16 +181,21 @@ export default function DocumentDetail() {
     { label: 'Date',       field: 'date_depicted',     value: doc.date_depicted   },
     { label: 'Location',   field: 'location',          value: doc.location        },
     { label: 'Medium',     field: 'medium',            value: doc.medium,
-      // Show the canonical category as the primary label and the raw phrase
-      // (still user-editable) as a muted subtitle.
+      // Canonical category as a small dropdown the user can correct, with
+      // the raw LLM phrase below as a muted, inline-editable subtitle.
       render: () => (
         <div>
-          {doc.medium_category && (
-            <div style={{ textTransform: 'capitalize', fontWeight: 600, color: 'var(--text-body)' }}>
-              {doc.medium_category}
-            </div>
-          )}
-          <div style={{ fontStyle: doc.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          <select
+            value={doc.medium_category || ''}
+            onChange={e => save('medium_category', e.target.value || null)}
+            style={{ width: 'auto', textTransform: 'capitalize', fontWeight: 600, fontSize: '0.95em', padding: '0.2rem 0.4rem' }}
+          >
+            <option value="">— uncategorized —</option>
+            {MEDIUM_CATEGORIES.map(c => (
+              <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c}</option>
+            ))}
+          </select>
+          <div style={{ fontStyle: doc.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em', marginTop: '0.2rem' }}>
             <InlineEdit value={doc.medium} onSave={v => save('medium', v)} placeholder="Add medium detail…" />
           </div>
         </div>

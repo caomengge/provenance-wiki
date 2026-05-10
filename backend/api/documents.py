@@ -255,9 +255,16 @@ def update_document(doc_id):
     data = request.get_json(silent=True) or {}
     allowed = {"annotation", "is_key_evidence", "is_trashed", "title", "date_depicted",
                "date_range_start", "date_range_end", "location", "medium",
-               "description", "language", "dimensions", "source_archive",
-               "transcription"}
+               "medium_category", "description", "language", "dimensions",
+               "source_archive", "transcription"}
     updates = {k: v for k, v in data.items() if k in allowed}
+
+    if "medium_category" in updates:
+        from modules.medium_taxonomy import CATEGORIES
+        v = (updates["medium_category"] or "").strip().lower() or None
+        if v is not None and v not in CATEGORIES:
+            return jsonify({"error": f"medium_category must be one of {CATEGORIES}"}), 400
+        updates["medium_category"] = v
 
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400

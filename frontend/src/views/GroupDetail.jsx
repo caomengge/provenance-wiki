@@ -10,6 +10,7 @@ import { useJobStatus } from '../JobStatus'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 import TranscriptionEditor from '../components/TranscriptionEditor'
+import { MEDIUM_CATEGORIES } from '../constants/medium'
 
 export default function GroupDetail() {
   const { id }     = useParams()
@@ -162,12 +163,17 @@ export default function GroupDetail() {
     { label: 'Medium',     field: 'medium',          value: group.medium,
       render: () => (
         <div>
-          {group.medium_category && (
-            <div style={{ textTransform: 'capitalize', fontWeight: 600, color: 'var(--text-body)' }}>
-              {group.medium_category}
-            </div>
-          )}
-          <div style={{ fontStyle: group.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+          <select
+            value={group.medium_category || ''}
+            onChange={e => save('medium_category', e.target.value || null)}
+            style={{ width: 'auto', textTransform: 'capitalize', fontWeight: 600, fontSize: '0.95em', padding: '0.2rem 0.4rem' }}
+          >
+            <option value="">— uncategorized —</option>
+            {MEDIUM_CATEGORIES.map(c => (
+              <option key={c} value={c} style={{ textTransform: 'capitalize' }}>{c}</option>
+            ))}
+          </select>
+          <div style={{ fontStyle: group.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em', marginTop: '0.2rem' }}>
             <InlineEdit value={group.medium} onSave={v => save('medium', v)} placeholder="Add medium detail…" />
           </div>
         </div>
