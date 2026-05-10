@@ -9,6 +9,8 @@ Routes:
 
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
+from modules.db import get_db, rows_to_list
+
 bp = Blueprint("ingest", __name__)
 
 
@@ -61,3 +63,65 @@ def ingest_progress():
             "X-Accel-Buffering": "no",    # disable Nginx buffering
         }
     )
+
+
+@bp.route("/api/ingest/runs", methods=["GET"])
+def list_runs():
+    """Return recent ingestion runs, newest first."""
+    limit = min(int(request.args.get("limit", 50)), 200)
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT id, started_at, finished_at, source_archive,
+                      total, processed, skipped, errors, status
+               FROM ingest_runs
+               ORDER BY id DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return jsonify({"runs": rows_to_list(rows)})
+
+
+@bp.route("/api/ingest/runs/<int:run_id>", methods=["GET"])
+def get_run(run_id):
+    """Return summary for a single run plus per-status counts."""
+    with get_db() as conn:
+        run = conn.execute(
+            """SELECT id, started_at, finished_at, source_archive,
+                      total, processed, skipped, errors, status
+               FROM ingest_runs WHERE id=?""",
+            (run_id,),
+        ).fetchone()
+        if not run:
+            return jsonify({"error": "Run not found"}), 404
+        counts = conn.execute(
+            "SELECT status, COUNT(*) AS n FROM ingest_run_files WHERE run_id=? GROUP BY status",
+            (run_id,),
+        ).fetchall()
+    return jsonify({
+        "run":    dict(run),
+        "counts": {r["status"]: r["n"] for r in counts},
+    })
+
+
+@bp.route("/api/ingest/runs/<int:run_id>/files", methods=["GET"])
+def get_run_files(run_id):
+    """Return files recorded for a run, optionally filtered by status."""
+    status = request.args.get("status")  # 'ok' | 'err' | 'skipped' | 'requeued'
+    limit  = min(int(request.args.get("limit", 500)), 2000)
+    offset = int(request.args.get("offset", 0))
+
+    sql = """SELECT f.filename, f.sha256, f.status, f.error_message, f.document_id,
+                    d.title AS document_title
+             FROM ingest_run_files f
+             LEFT JOIN documents d ON d.id = f.document_id
+             WHERE f.run_id = ?"""
+    params = [run_id]
+    if status:
+        sql += " AND f.status = ?"
+        params.append(status)
+    sql += " ORDER BY f.filename LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return jsonify({"files": rows_to_list(rows)})

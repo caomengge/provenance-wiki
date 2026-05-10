@@ -86,8 +86,9 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
     from modules.extractor import extract_from_image, generate_text_embedding
     from modules.thumbnails import ensure_thumbnail
 
+    run_id = _create_run(source_archive)
     try:
-        _emit({"type": "start", "message": "Scanning photos directory…"})
+        _emit({"type": "start", "run_id": run_id, "message": "Scanning photos directory…"})
 
         # Collect all supported files
         all_files = [
@@ -95,12 +96,14 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
             if p.is_file() and p.suffix.lower() in SUPPORTED_EXTS
         ]
         total = len(all_files)
+        _update_run(run_id, total=total)
         _emit({"type": "scan", "total": total, "message": f"Found {total} image files"})
 
         # Filter out already-processed files.
         # Re-queue any document whose description starts with "Extraction failed"
         # (happens when a bad API key was used on a previous ingest run).
         pending = []
+        skipped_files = []   # (filename, sha) of files we are NOT processing
         for p in all_files:
             sha = _sha256(p)
             if not document_exists_by_sha256(sha):
@@ -114,8 +117,19 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                     if row and row["description"] and row["description"].startswith("Extraction failed"):
                         pending.append((p, sha, row["id"]))
                         logger.info("Queued for retry (previous extraction failed): %s", p.name)
+                    else:
+                        skipped_files.append((p.name, sha, row["id"] if row else None))
+
+        # Record skipped/requeued files in the run log
+        _record_files(run_id, [
+            (name, sha, "skipped", None, doc_id) for (name, sha, doc_id) in skipped_files
+        ] + [
+            (p.name, sha, "requeued", None, existing_id)
+            for (p, sha, existing_id) in pending if existing_id is not None
+        ])
 
         skipped = total - len(pending)
+        _update_run(run_id, skipped=skipped)
         _emit({
             "type":    "filter",
             "pending": len(pending),
@@ -124,6 +138,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
         })
 
         if not pending:
+            _finalize_run(run_id, processed=0, skipped=skipped, errors=0, status="done")
             _emit({"type": "done", "processed": 0, "skipped": skipped, "errors": 0})
             return
 
@@ -140,15 +155,17 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                 "file": photo_path.name,
             })
             try:
-                _process_single(photo_path, sha, api_key, get_db,
+                doc_id = _process_single(photo_path, sha, api_key, get_db,
                                 upsert_entity, get_or_create_tag,
                                 extract_from_image, generate_text_embedding,
                                 source_archive=source_archive,
                                 existing_id=existing_id)
                 ensure_thumbnail(photo_path, sha)
+                _record_files(run_id, [(photo_path.name, sha, "ok", None, doc_id)])
                 return ("ok", photo_path.name, None)
             except Exception as exc:
                 logger.exception("Failed to process %s", photo_path.name)
+                _record_files(run_id, [(photo_path.name, sha, "err", str(exc), existing_id)])
                 return ("err", photo_path.name, str(exc))
 
         worker_count = max(1, INGEST_WORKERS)
@@ -176,6 +193,8 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                             "message": err,
                         })
 
+        _finalize_run(run_id, processed=processed, skipped=skipped,
+                      errors=errors, status="done")
         _emit({
             "type":      "done",
             "processed": processed,
@@ -186,6 +205,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
 
     except Exception as exc:
         logger.exception("Ingestion worker crashed")
+        _finalize_run(run_id, status="crashed")
         _emit({"type": "error", "message": f"Ingestion crashed: {exc}"})
         _emit({"type": "done",  "processed": 0, "skipped": 0, "errors": 1})
     finally:
@@ -285,7 +305,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
             )
             if cur.lastrowid == 0:
                 # Already exists (race condition guard)
-                return
+                return None
             doc_id = cur.lastrowid
 
         # Insert entities
@@ -332,6 +352,65 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     "INSERT OR IGNORE INTO document_tags (document_id, tag_id) VALUES (?,?)",
                     (doc_id, tag_id),
                 )
+
+    return doc_id
+
+
+# ── Run-log helpers ───────────────────────────────────────────────────────────
+
+def _create_run(source_archive: str | None) -> int:
+    from modules.db import get_db
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO ingest_runs (source_archive, status) VALUES (?, 'running')",
+            (source_archive,),
+        )
+        return cur.lastrowid
+
+
+def _update_run(run_id: int, **fields) -> None:
+    if not fields:
+        return
+    from modules.db import get_db
+    cols = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [run_id]
+    with get_db() as conn:
+        conn.execute(f"UPDATE ingest_runs SET {cols} WHERE id=?", vals)
+
+
+def _finalize_run(run_id: int, *, processed: int = None, skipped: int = None,
+                  errors: int = None, status: str = "done") -> None:
+    from modules.db import get_db
+    sets = ["finished_at = datetime('now')", "status = ?"]
+    vals = [status]
+    if processed is not None:
+        sets.append("processed = ?"); vals.append(processed)
+    if skipped is not None:
+        sets.append("skipped = ?"); vals.append(skipped)
+    if errors is not None:
+        sets.append("errors = ?"); vals.append(errors)
+    vals.append(run_id)
+    with get_db() as conn:
+        conn.execute(f"UPDATE ingest_runs SET {', '.join(sets)} WHERE id=?", vals)
+
+
+def _record_files(run_id: int, rows: list) -> None:
+    """rows: iterable of (filename, sha256, status, error_message, document_id)."""
+    if not rows:
+        return
+    from modules.db import get_db
+    with get_db() as conn:
+        conn.executemany(
+            """INSERT INTO ingest_run_files
+               (run_id, filename, sha256, status, error_message, document_id)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(run_id, sha256) DO UPDATE SET
+                   filename       = excluded.filename,
+                   status         = excluded.status,
+                   error_message  = excluded.error_message,
+                   document_id    = excluded.document_id""",
+            [(run_id, *r) for r in rows],
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
