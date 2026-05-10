@@ -102,22 +102,28 @@ def create_group():
     ]))
     embedding = generate_text_embedding(embed_text, API_KEY)
 
+    from modules.medium_taxonomy import categorize, CATEGORIES
+    raw_medium      = extracted.get("medium")
+    llm_category    = (extracted.get("medium_category") or "").strip().lower()
+    medium_category = llm_category if llm_category in CATEGORIES else categorize(raw_medium)
+
     with get_db() as conn:
         # Insert group record
         cur = conn.execute(
             """INSERT INTO document_groups
                (title, date_depicted, date_range_start, date_range_end,
-                location, medium, dimensions, description, language,
+                location, medium, medium_category, dimensions, description, language,
                 transcription, raw_claude_response, is_key_evidence,
                 embedding_json, source_archive)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 title or extracted.get("title"),
                 _normalize_date(extracted.get("date_depicted")),
                 extracted.get("date_range_start"),
                 extracted.get("date_range_end"),
                 extracted.get("location"),
-                extracted.get("medium"),
+                raw_medium,
+                medium_category,
                 extracted.get("dimensions"),
                 extracted.get("description"),
                 extracted.get("language"),
@@ -238,10 +244,14 @@ def list_groups():
             wheres.append("g.source_archive = ?")
             params.append(source_archive)
     if medium:
+        # `medium` here is the canonical category — see documents.py note.
         if medium == "__none__":
-            wheres.append("(g.medium IS NULL OR g.medium = '')")
+            wheres.append(
+                "((g.medium_category IS NULL OR g.medium_category = 'other') "
+                "AND (g.medium IS NULL OR g.medium = ''))"
+            )
         else:
-            wheres.append("g.medium = ? COLLATE NOCASE")
+            wheres.append("g.medium_category = ?")
             params.append(medium)
 
     join_sql  = " ".join(joins)
@@ -255,7 +265,7 @@ def list_groups():
 
         rows = conn.execute(
             f"""SELECT g.id, g.title, g.date_depicted, g.date_range_start,
-                       g.date_range_end, g.location, g.medium,
+                       g.date_range_end, g.location, g.medium, g.medium_category,
                        g.is_key_evidence, g.source_archive, g.created_at, g.updated_at,
                        COUNT(d.id) as page_count,
                        MIN(d.id) as first_page_id
@@ -288,7 +298,7 @@ def get_group(group_id):
         # neither of which the frontend uses but which together can be 30KB+.
         group = conn.execute(
             """SELECT id, title, date_depicted, date_range_start, date_range_end,
-                      location, medium, dimensions, description, language,
+                      location, medium, medium_category, dimensions, description, language,
                       transcription, annotation, is_key_evidence, is_trashed,
                       source_archive, created_at, updated_at
                FROM document_groups WHERE id=?""",
@@ -527,12 +537,17 @@ def re_extract_group(group_id):
     ]))
     embedding = generate_text_embedding(embed_text, API_KEY)
 
+    from modules.medium_taxonomy import categorize, CATEGORIES
+    raw_medium      = extracted.get("medium")
+    llm_category    = (extracted.get("medium_category") or "").strip().lower()
+    medium_category = llm_category if llm_category in CATEGORIES else categorize(raw_medium)
+
     with get_db() as conn:
         # Preserve is_key_evidence (a user-set flag) across re-extraction.
         conn.execute(
             """UPDATE document_groups SET
                 title=?, date_depicted=?, date_range_start=?, date_range_end=?,
-                location=?, medium=?, dimensions=?, description=?, language=?,
+                location=?, medium=?, medium_category=?, dimensions=?, description=?, language=?,
                 transcription=?, raw_claude_response=?,
                 embedding_json=?, updated_at=datetime('now')
                WHERE id=?""",
@@ -540,7 +555,7 @@ def re_extract_group(group_id):
                 extracted.get("title"),
                 _normalize_date(extracted.get("date_depicted")), extracted.get("date_range_start"),
                 extracted.get("date_range_end"), extracted.get("location"),
-                extracted.get("medium"), extracted.get("dimensions"),
+                raw_medium, medium_category, extracted.get("dimensions"),
                 extracted.get("description"), extracted.get("language"),
                 extracted.get("transcription"), json.dumps(extracted),
                 json.dumps(embedding) if embedding else None,
