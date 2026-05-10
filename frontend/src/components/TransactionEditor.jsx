@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import api from '../api/client'
+import ScoreBadge from './TransactionScoreBadge'
 
 const EMPTY = {
   seller: '', buyer: '', date: '', price: '', currency: '',
@@ -80,42 +81,13 @@ function TransactionForm({ data, onChange, onSave, onCancel, onDelete, saving })
   )
 }
 
-function scoreColor(score) {
-  if (score >= 3) return { bg: '#dcf5e3', border: '#3a9d5a', text: '#1f6b3a' }   // green
-  if (score === 2) return { bg: '#fcf3d4', border: '#b88a1f', text: '#7a5a0e' }  // amber
-  return { bg: '#fbe1e1', border: '#c14a4a', text: '#871f1f' }                   // red 0-1
-}
-
-function ScoreBadge({ score }) {
-  const c = scoreColor(score)
-  return (
-    <span
-      title={`Quality score: ${score} of 5 anchor fields (seller, buyer, date, price, auction_house) present`}
-      style={{
-        display: 'inline-block',
-        fontSize: '0.7rem',
-        fontWeight: 700,
-        padding: '0.1rem 0.4rem',
-        borderRadius: '3px',
-        background: c.bg,
-        border: `1px solid ${c.border}`,
-        color: c.text,
-        whiteSpace: 'nowrap',
-        marginLeft: '0.4rem',
-      }}
-    >
-      {score}/5
-    </span>
-  )
-}
-
 function TransactionRow({ t, onEdit }) {
   return (
     <div style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '0.75rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
       <div style={{ flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem' }}>
           {t.date && <span style={{ fontWeight: 600, color: 'var(--navy)' }}>{t.date}</span>}
-          {typeof t.score === 'number' && <ScoreBadge score={t.score} />}
+          {typeof t.score === 'number' && <ScoreBadge score={t.score} style={{ marginLeft: '0.4rem' }} />}
         </div>
         {(t.seller || t.buyer) && (
           <div style={{ fontSize: '0.9rem' }}>

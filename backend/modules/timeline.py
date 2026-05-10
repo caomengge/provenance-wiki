@@ -37,6 +37,7 @@ def get_timeline(
         }
     """
     from modules.db import get_db
+    from modules.extractor import transaction_score
 
     with get_db() as conn:
         dated_events   = []
@@ -60,6 +61,7 @@ def get_timeline(
                 "location":     t.get("location"),
                 "notes":        t.get("notes"),
                 "label":        _txn_label(t),
+                "score":        transaction_score(t),
             })
 
         # ── Group transaction events ──────────────────────────────────────────
@@ -81,6 +83,7 @@ def get_timeline(
                 "location":     t.get("location"),
                 "notes":        t.get("notes"),
                 "label":        _txn_label(t),
+                "score":        transaction_score(t),
             })
 
         # ── Standalone document date events ───────────────────────────────────
