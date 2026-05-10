@@ -9,6 +9,7 @@ import DocumentLinkModal from '../components/DocumentLinkModal'
 import InlineEdit from '../components/InlineEdit'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
+import TranscriptionEditor from '../components/TranscriptionEditor'
 
 export default function DocumentDetail() {
   const { id }       = useParams()
@@ -699,13 +700,11 @@ export default function DocumentDetail() {
               <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Transcription</h2>
               <button onClick={() => setShowTranscription(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>✕</button>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1, fontSize: '0.92rem', lineHeight: 1.8, color: 'var(--text-body)' }}>
-              <InlineEdit
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              <TranscriptionEditor
                 value={doc.transcription}
                 onSave={v => save('transcription', v)}
-                multiline
-                placeholder="Type or paste transcription…"
-                emptyLabel="No transcription — click to add one"
+                emptyLabel="No transcription — click Edit to add one."
               />
             </div>
           </div>
