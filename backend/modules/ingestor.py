@@ -103,7 +103,6 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
         # Re-queue any document whose description starts with "Extraction failed"
         # (happens when a bad API key was used on a previous ingest run).
         pending = []
-        skipped_files = []   # (filename, sha) of files we are NOT processing
         for p in all_files:
             sha = _sha256(p)
             if not document_exists_by_sha256(sha):
@@ -117,13 +116,12 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
                     if row and row["description"] and row["description"].startswith("Extraction failed"):
                         pending.append((p, sha, row["id"]))
                         logger.info("Queued for retry (previous extraction failed): %s", p.name)
-                    else:
-                        skipped_files.append((p.name, sha, row["id"] if row else None))
 
-        # Record skipped/requeued files in the run log
+        # Record requeued files in the run log.
+        # We intentionally don't store per-file "skipped" rows — the count is
+        # kept on ingest_runs.skipped, and writing N rows per run for an N-file
+        # archive bloats the table for very little value.
         _record_files(run_id, [
-            (name, sha, "skipped", None, doc_id) for (name, sha, doc_id) in skipped_files
-        ] + [
             (p.name, sha, "requeued", None, existing_id)
             for (p, sha, existing_id) in pending if existing_id is not None
         ])

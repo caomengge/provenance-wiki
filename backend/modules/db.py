@@ -351,6 +351,11 @@ def init_db():
         _migrate(conn, "ALTER TABLE document_groups ADD COLUMN medium_category TEXT")
         _backfill_medium_category(conn)
 
+        # Drop legacy per-file "skipped" rows — we no longer record these
+        # because the count is kept on ingest_runs.skipped and the per-file
+        # rows bloat the table without adding value. Safe to re-run.
+        _migrate(conn, "DELETE FROM ingest_run_files WHERE status='skipped'")
+
         # Sweep any pre-existing orphan entities and tags left behind by
         # deletions that occurred before the cleanup logic was added.
         conn.execute("""

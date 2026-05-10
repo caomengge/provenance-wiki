@@ -5,7 +5,6 @@ import api from '../api/client'
 const STATUS_TABS = [
   { key: 'ok',       label: 'Ingested' },
   { key: 'err',      label: 'Failed' },
-  { key: 'skipped',  label: 'Skipped' },
   { key: 'requeued', label: 'Re-queued' },
   { key: 'grouped',  label: 'Grouped' },
 ]
