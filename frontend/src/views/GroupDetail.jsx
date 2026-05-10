@@ -10,6 +10,7 @@ import { useJobStatus } from '../JobStatus'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 import TranscriptionEditor from '../components/TranscriptionEditor'
+import AuditHistory from '../components/AuditHistory'
 import { MEDIUM_CATEGORIES } from '../constants/medium'
 
 export default function GroupDetail() {
@@ -37,6 +38,9 @@ export default function GroupDetail() {
 
   // Transcription modal
   const [showTranscription, setShowTranscription] = useState(false)
+
+  // History panel
+  const [showHistory, setShowHistory] = useState(false)
 
   // Page reorder drag state
   const [pageOrder, setPageOrder]     = useState([])
@@ -326,6 +330,20 @@ export default function GroupDetail() {
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '1rem' }}>
             <div>Created: {new Date(group.created_at).toLocaleDateString()}</div>
             <div>Updated: {new Date(group.updated_at).toLocaleDateString()}</div>
+            <div style={{ marginTop: '0.4rem' }}>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => setShowHistory(v => !v)}
+              >
+                {showHistory ? '▾ Hide History' : '▸ Show History'}
+              </button>
+            </div>
+            {showHistory && (
+              <div style={{ marginTop: '0.6rem', padding: '0.6rem', background: 'var(--cream-light, #faf7f2)', border: '1px solid var(--border)', borderRadius: '3px' }}>
+                <AuditHistory entityType="group" entityId={group.id} />
+              </div>
+            )}
           </div>
         </div>
 
