@@ -125,3 +125,57 @@ def get_run_files(run_id):
     with get_db() as conn:
         rows = conn.execute(sql, params).fetchall()
     return jsonify({"files": rows_to_list(rows)})
+
+
+@bp.route("/api/ingest/runs/<int:run_id>/groups", methods=["GET"])
+def get_run_groups(run_id):
+    """Return groups whose member documents were created in this run."""
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT g.id, g.title, g.created_at,
+                      COUNT(DISTINCT d.id) AS pages_in_group,
+                      COUNT(DISTINCT f.sha256) AS pages_from_run
+               FROM ingest_run_files f
+               JOIN documents d ON d.id = f.document_id
+               JOIN document_groups g ON g.id = d.group_id
+               WHERE f.run_id = ? AND f.status = 'ok'
+               GROUP BY g.id
+               ORDER BY g.created_at DESC""",
+            (run_id,),
+        ).fetchall()
+    return jsonify({"groups": rows_to_list(rows)})
+
+
+# ── Audit log ────────────────────────────────────────────────────────────────
+
+@bp.route("/api/audit", methods=["GET"])
+def get_audit():
+    """Return audit events filtered by entity_type+entity_id or run_id."""
+    entity_type = request.args.get("entity_type")
+    entity_id   = request.args.get("entity_id", type=int)
+    run_id      = request.args.get("run_id", type=int)
+    limit       = min(int(request.args.get("limit", 200)), 1000)
+
+    wheres, params = [], []
+    if entity_type:
+        wheres.append("entity_type = ?")
+        params.append(entity_type)
+    if entity_id is not None:
+        wheres.append("entity_id = ?")
+        params.append(entity_id)
+    if run_id is not None:
+        wheres.append("run_id = ?")
+        params.append(run_id)
+    if not wheres:
+        return jsonify({"error": "Specify entity_type+entity_id or run_id"}), 400
+
+    sql = f"""SELECT id, ts, actor, entity_type, entity_id, action, field,
+                     old_value, new_value, run_id
+              FROM audit_events
+              WHERE {' AND '.join(wheres)}
+              ORDER BY id DESC
+              LIMIT ?"""
+    params.append(limit)
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return jsonify({"events": rows_to_list(rows)})

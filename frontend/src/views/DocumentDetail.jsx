@@ -10,6 +10,7 @@ import InlineEdit from '../components/InlineEdit'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 import TranscriptionEditor from '../components/TranscriptionEditor'
+import AuditHistory from '../components/AuditHistory'
 import { MEDIUM_CATEGORIES } from '../constants/medium'
 
 export default function DocumentDetail() {
@@ -26,6 +27,7 @@ export default function DocumentDetail() {
   const [wipeModalOpen, setWipeModalOpen] = useState(false)
   const [wiping, setWiping] = useState(false)
   const [archives, setArchives] = useState([])
+  const [showHistory, setShowHistory] = useState(false)
 
   // Trash
   const [trashModalOpen, setTrashModalOpen] = useState(false)
@@ -589,7 +591,7 @@ export default function DocumentDetail() {
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             <div>Added: {new Date(doc.created_at).toLocaleDateString()}</div>
             <div>Updated: {new Date(doc.updated_at).toLocaleDateString()}</div>
-            <div style={{ marginTop: '0.4rem' }}>
+            <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-ghost"
                 style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}
@@ -597,7 +599,19 @@ export default function DocumentDetail() {
               >
                 View in Network →
               </button>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => setShowHistory(v => !v)}
+              >
+                {showHistory ? '▾ Hide History' : '▸ Show History'}
+              </button>
             </div>
+            {showHistory && (
+              <div style={{ marginTop: '0.6rem', padding: '0.6rem', background: 'var(--cream-light, #faf7f2)', border: '1px solid var(--border)', borderRadius: '3px' }}>
+                <AuditHistory entityType="document" entityId={doc.id} />
+              </div>
+            )}
           </div>
         </div>
       </div>
