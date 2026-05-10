@@ -51,18 +51,34 @@ def list_entities():
             f"SELECT COUNT(*) as cnt FROM entities e {where_sql}", params
         ).fetchone()["cnt"]
 
+        # doc_count rolls each grouped child document up into its parent group,
+        # so a group counts as one record no matter how many child pages mention
+        # the entity. UNION (not UNION ALL) dedupes the case where an entity is
+        # attached to both a child page and the group itself.
         rows = conn.execute(
             f"""SELECT e.id, e.name, e.type, e.normalized_name, e.created_at,
-                       (SELECT COUNT(DISTINCT de.document_id)
-                        FROM document_entities de
-                        JOIN documents d ON d.id = de.document_id
-                        WHERE de.entity_id = e.id AND d.is_trashed = 0
-                       ) +
-                       (SELECT COUNT(DISTINCT ge.group_id)
-                        FROM group_entities ge
-                        JOIN document_groups g ON g.id = ge.group_id
-                        WHERE ge.entity_id = e.id AND g.is_trashed = 0
-                       ) AS doc_count
+                       (SELECT COUNT(*) FROM (
+                          SELECT d.id AS rid, 'd' AS kind
+                          FROM document_entities de
+                          JOIN documents d ON d.id = de.document_id
+                          WHERE de.entity_id = e.id
+                            AND d.is_trashed = 0
+                            AND d.group_id IS NULL
+                          UNION
+                          SELECT d.group_id AS rid, 'g' AS kind
+                          FROM document_entities de
+                          JOIN documents d ON d.id = de.document_id
+                          JOIN document_groups g ON g.id = d.group_id
+                          WHERE de.entity_id = e.id
+                            AND d.is_trashed = 0
+                            AND d.group_id IS NOT NULL
+                            AND g.is_trashed = 0
+                          UNION
+                          SELECT ge.group_id AS rid, 'g' AS kind
+                          FROM group_entities ge
+                          JOIN document_groups g ON g.id = ge.group_id
+                          WHERE ge.entity_id = e.id AND g.is_trashed = 0
+                       )) AS doc_count
                 FROM entities e
                 {where_sql}
                 GROUP BY e.id
@@ -92,53 +108,89 @@ def get_entity(entity_id):
 
         entity = row_to_dict(entity)
 
-        # Standalone documents (not grouped)
+        # Standalone documents (not in any group)
         docs = conn.execute(
             """SELECT d.id, d.title, d.filename, d.date_depicted, de.role,
                       'document' as record_type
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ? AND d.is_trashed = 0
+               WHERE de.entity_id = ? AND d.is_trashed = 0 AND d.group_id IS NULL
                ORDER BY d.date_depicted NULLS LAST
                LIMIT 50""",
             (entity_id,)
         ).fetchall()
 
-        # Groups that mention this entity
+        # Groups reached either via group_entities OR via any child page that
+        # mentions the entity. role is taken from group_entities when present.
         groups = conn.execute(
-            """SELECT g.id, g.title, g.date_depicted, ge.role,
+            """SELECT g.id, g.title, g.date_depicted,
+                      (SELECT ge.role FROM group_entities ge
+                       WHERE ge.group_id = g.id AND ge.entity_id = ?) AS role,
                       'group' as record_type
-               FROM group_entities ge
-               JOIN document_groups g ON g.id = ge.group_id
-               WHERE ge.entity_id = ? AND g.is_trashed = 0
+               FROM document_groups g
+               WHERE g.is_trashed = 0 AND (
+                   g.id IN (SELECT group_id FROM group_entities WHERE entity_id = ?)
+                   OR g.id IN (SELECT d.group_id FROM document_entities de
+                               JOIN documents d ON d.id = de.document_id
+                               WHERE de.entity_id = ? AND d.is_trashed = 0
+                                 AND d.group_id IS NOT NULL)
+               )
                ORDER BY g.date_depicted NULLS LAST
                LIMIT 50""",
-            (entity_id,)
+            (entity_id, entity_id, entity_id)
         ).fetchall()
 
         all_docs = rows_to_list(docs) + rows_to_list(groups)
 
-        # Co-occurring entities (from standalone docs + groups)
+        # Co-occurring entities: only count co-occurrences within standalone
+        # documents and within groups (treating each group as one bucket of
+        # entities = group_entities ∪ entities of its child pages).
         co_entities = conn.execute(
-            """SELECT e.id, e.name, e.type, COUNT(*) as co_count
-               FROM document_entities de1
-               JOIN document_entities de2 ON de2.document_id = de1.document_id
-                   AND de2.entity_id != de1.entity_id
-               JOIN entities e ON e.id = de2.entity_id
-               JOIN documents d ON d.id = de1.document_id
-               WHERE de1.entity_id = ? AND d.group_id IS NULL
-               GROUP BY e.id
-               UNION ALL
-               SELECT e.id, e.name, e.type, COUNT(*) as co_count
-               FROM group_entities ge1
-               JOIN group_entities ge2 ON ge2.group_id = ge1.group_id
-                   AND ge2.entity_id != ge1.entity_id
-               JOIN entities e ON e.id = ge2.entity_id
-               WHERE ge1.entity_id = ?
+            """SELECT e.id, e.name, e.type, COUNT(*) as co_count FROM (
+                   -- standalone-document co-occurrences
+                   SELECT de2.entity_id AS eid
+                   FROM document_entities de1
+                   JOIN documents d ON d.id = de1.document_id
+                   JOIN document_entities de2 ON de2.document_id = de1.document_id
+                       AND de2.entity_id != de1.entity_id
+                   WHERE de1.entity_id = ? AND d.is_trashed = 0
+                     AND d.group_id IS NULL
+
+                   UNION ALL
+
+                   -- group co-occurrences: union the entity sets reached via
+                   -- group_entities and via child documents, then pair each
+                   -- such entity with every other entity in the same group's
+                   -- combined set.
+                   SELECT other.entity_id AS eid
+                   FROM (
+                       SELECT g.id AS gid
+                       FROM document_groups g
+                       WHERE g.is_trashed = 0 AND (
+                           g.id IN (SELECT group_id FROM group_entities WHERE entity_id = ?)
+                           OR g.id IN (SELECT d.group_id FROM document_entities de
+                                       JOIN documents d ON d.id = de.document_id
+                                       WHERE de.entity_id = ? AND d.is_trashed = 0
+                                         AND d.group_id IS NOT NULL)
+                       )
+                   ) src
+                   JOIN (
+                       SELECT g.id AS gid, ge.entity_id
+                       FROM document_groups g
+                       JOIN group_entities ge ON ge.group_id = g.id
+                       WHERE g.is_trashed = 0
+                       UNION
+                       SELECT d.group_id AS gid, de.entity_id
+                       FROM documents d
+                       JOIN document_entities de ON de.document_id = d.id
+                       WHERE d.is_trashed = 0 AND d.group_id IS NOT NULL
+                   ) other ON other.gid = src.gid AND other.entity_id != ?
+               ) co
+               JOIN entities e ON e.id = co.eid
                GROUP BY e.id
                ORDER BY co_count DESC
                LIMIT 20""",
-            (entity_id, entity_id)
+            (entity_id, entity_id, entity_id, entity_id)
         ).fetchall()
 
         entity["documents"]    = all_docs
@@ -165,15 +217,21 @@ def entity_documents(entity_id):
         doc_count = conn.execute(
             """SELECT COUNT(*) as cnt FROM document_entities de
                JOIN documents d ON d.id = de.document_id
-               WHERE de.entity_id = ? AND d.is_trashed = 0""",
+               WHERE de.entity_id = ? AND d.is_trashed = 0
+                 AND d.group_id IS NULL""",
             (entity_id,)
         ).fetchone()["cnt"]
 
         grp_count = conn.execute(
-            """SELECT COUNT(*) as cnt FROM group_entities ge
-               JOIN document_groups g ON g.id = ge.group_id
-               WHERE ge.entity_id = ? AND g.is_trashed = 0""",
-            (entity_id,)
+            """SELECT COUNT(*) as cnt FROM document_groups g
+               WHERE g.is_trashed = 0 AND (
+                   g.id IN (SELECT group_id FROM group_entities WHERE entity_id = ?)
+                   OR g.id IN (SELECT d.group_id FROM document_entities de
+                               JOIN documents d ON d.id = de.document_id
+                               WHERE de.entity_id = ? AND d.is_trashed = 0
+                                 AND d.group_id IS NOT NULL)
+               )""",
+            (entity_id, entity_id)
         ).fetchone()["cnt"]
 
         total = doc_count + grp_count
@@ -185,20 +243,33 @@ def entity_documents(entity_id):
                FROM document_entities de
                JOIN documents d ON d.id = de.document_id
                WHERE de.entity_id = ? AND d.is_trashed = 0
+                 AND d.group_id IS NULL
                ORDER BY d.date_depicted NULLS LAST, d.created_at""",
             (entity_id,)
         ).fetchall()
 
+        # role/context come from group_entities when the entity is explicitly
+        # attached to the group; otherwise they're NULL (the link comes from a
+        # child page, whose per-page role lives on the document detail view).
         grp_rows = conn.execute(
             """SELECT g.id, g.title, NULL as filename,
                       g.date_depicted, g.date_range_start,
-                      g.is_key_evidence, g.medium, ge.role, ge.context,
+                      g.is_key_evidence, g.medium,
+                      (SELECT ge.role FROM group_entities ge
+                       WHERE ge.group_id = g.id AND ge.entity_id = ?) AS role,
+                      (SELECT ge.context FROM group_entities ge
+                       WHERE ge.group_id = g.id AND ge.entity_id = ?) AS context,
                       'group' as record_type
-               FROM group_entities ge
-               JOIN document_groups g ON g.id = ge.group_id
-               WHERE ge.entity_id = ? AND g.is_trashed = 0
+               FROM document_groups g
+               WHERE g.is_trashed = 0 AND (
+                   g.id IN (SELECT group_id FROM group_entities WHERE entity_id = ?)
+                   OR g.id IN (SELECT d.group_id FROM document_entities de
+                               JOIN documents d ON d.id = de.document_id
+                               WHERE de.entity_id = ? AND d.is_trashed = 0
+                                 AND d.group_id IS NOT NULL)
+               )
                ORDER BY g.date_depicted NULLS LAST, g.created_at""",
-            (entity_id,)
+            (entity_id, entity_id, entity_id, entity_id)
         ).fetchall()
 
         all_rows = sorted(
