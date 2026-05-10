@@ -81,13 +81,20 @@ function TimelineEvent({ event, onDocClick }) {
         </div>
 
         {isTxn && (
-          <div style={{ marginTop: '0.3rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-            {event.seller && <span><em>From:</em> {event.seller}</span>}
-            {event.seller && event.buyer && <span style={{ margin: '0 0.4rem' }}>→</span>}
-            {event.buyer && <span><em>To:</em> {event.buyer}</span>}
-            {event.price && <span style={{ marginLeft: '0.75rem' }}>{event.currency} {Number(event.price).toLocaleString()}</span>}
-            {event.auction_house && <span style={{ marginLeft: '0.75rem' }}>· {event.auction_house}</span>}
-          </div>
+          <>
+            <div style={{ marginTop: '0.3rem', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              {event.seller && <span><em>From:</em> {event.seller}</span>}
+              {event.seller && event.buyer && <span style={{ margin: '0 0.4rem' }}>→</span>}
+              {event.buyer && <span><em>To:</em> {event.buyer}</span>}
+              {event.price && <span style={{ marginLeft: '0.75rem' }}>{event.currency} {Number(event.price).toLocaleString()}</span>}
+              {event.auction_house && <span style={{ marginLeft: '0.75rem' }}>· {event.auction_house}</span>}
+            </div>
+            {event.notes && (
+              <div style={{ marginTop: '0.3rem', fontSize: '0.82rem', fontStyle: 'italic', color: 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+                {event.notes}
+              </div>
+            )}
+          </>
         )}
 
         {event.entity_names?.length > 0 && (
