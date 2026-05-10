@@ -242,7 +242,8 @@ def update_document(doc_id):
     data = request.get_json(silent=True) or {}
     allowed = {"annotation", "is_key_evidence", "is_trashed", "title", "date_depicted",
                "date_range_start", "date_range_end", "location", "medium",
-               "description", "language", "dimensions", "source_archive"}
+               "description", "language", "dimensions", "source_archive",
+               "transcription"}
     updates = {k: v for k, v in data.items() if k in allowed}
 
     if not updates:
