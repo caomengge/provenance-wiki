@@ -63,20 +63,88 @@ def create_app() -> Flask:
     # ── Stats endpoint ────────────────────────────────────────────────────────
     @app.route("/api/stats")
     def stats():
+        """Sidebar summary. All counts exclude trashed documents and groups.
+
+        - documents: each logical document — i.e. a standalone (ungrouped)
+                     document OR a multi-page group, counted once each.
+                     A 5-page group adds 1, not 5.
+        - entities:  entities with at least one reference from a non-trashed
+                     document or non-trashed group
+        - transactions: per-doc + per-group transactions, excluding any whose
+                        parent is trashed
+        - tags:      tags with at least one reference from a non-trashed
+                     document or non-trashed group
+        - key_evidence: docs OR groups flagged is_key_evidence (non-trashed)
+        """
         from modules.db import get_db
         with get_db() as conn:
-            doc_count    = conn.execute("SELECT COUNT(*) as c FROM documents WHERE group_id IS NULL").fetchone()["c"]
-            group_count  = conn.execute("SELECT COUNT(*) as c FROM document_groups").fetchone()["c"]
-            entity_count = conn.execute("SELECT COUNT(*) as c FROM entities").fetchone()["c"]
-            txn_count    = conn.execute("SELECT COUNT(*) as c FROM transactions").fetchone()["c"]
-            tag_count    = conn.execute("SELECT COUNT(*) as c FROM tags").fetchone()["c"]
-            key_count    = conn.execute("SELECT COUNT(*) as c FROM documents WHERE is_key_evidence=1 AND group_id IS NULL").fetchone()["c"]
+            standalone = conn.execute(
+                "SELECT COUNT(*) as c FROM documents "
+                "WHERE group_id IS NULL AND is_trashed = 0"
+            ).fetchone()["c"]
+
+            group_count = conn.execute(
+                "SELECT COUNT(*) as c FROM document_groups WHERE is_trashed = 0"
+            ).fetchone()["c"]
+
+            doc_count = standalone + group_count
+
+            entity_count = conn.execute("""
+                SELECT COUNT(*) AS c FROM entities e
+                WHERE EXISTS (
+                    SELECT 1 FROM document_entities de
+                    JOIN documents d ON d.id = de.document_id
+                    WHERE de.entity_id = e.id AND d.is_trashed = 0
+                )
+                OR EXISTS (
+                    SELECT 1 FROM group_entities ge
+                    JOIN document_groups g ON g.id = ge.group_id
+                    WHERE ge.entity_id = e.id AND g.is_trashed = 0
+                )
+            """).fetchone()["c"]
+
+            doc_txn = conn.execute(
+                "SELECT COUNT(*) AS c FROM transactions t "
+                "JOIN documents d ON d.id = t.document_id "
+                "WHERE d.is_trashed = 0"
+            ).fetchone()["c"]
+            grp_txn = conn.execute(
+                "SELECT COUNT(*) AS c FROM group_transactions gt "
+                "JOIN document_groups g ON g.id = gt.group_id "
+                "WHERE g.is_trashed = 0"
+            ).fetchone()["c"]
+            txn_count = doc_txn + grp_txn
+
+            tag_count = conn.execute("""
+                SELECT COUNT(*) AS c FROM tags t
+                WHERE EXISTS (
+                    SELECT 1 FROM document_tags dt
+                    JOIN documents d ON d.id = dt.document_id
+                    WHERE dt.tag_id = t.id AND d.is_trashed = 0
+                )
+                OR EXISTS (
+                    SELECT 1 FROM group_tags gt
+                    JOIN document_groups g ON g.id = gt.group_id
+                    WHERE gt.tag_id = t.id AND g.is_trashed = 0
+                )
+            """).fetchone()["c"]
+
+            doc_key = conn.execute(
+                "SELECT COUNT(*) AS c FROM documents "
+                "WHERE is_key_evidence = 1 AND is_trashed = 0 AND group_id IS NULL"
+            ).fetchone()["c"]
+            grp_key = conn.execute(
+                "SELECT COUNT(*) AS c FROM document_groups "
+                "WHERE is_key_evidence = 1 AND is_trashed = 0"
+            ).fetchone()["c"]
+            key_count = doc_key + grp_key
+
         return jsonify({
-            "documents":  doc_count,
-            "groups":     group_count,
-            "entities":   entity_count,
+            "documents":    doc_count,      # standalone + groups
+            "groups":       group_count,    # kept for callers that want the breakdown
+            "entities":     entity_count,
             "transactions": txn_count,
-            "tags":       tag_count,
+            "tags":         tag_count,
             "key_evidence": key_count,
         })
 
