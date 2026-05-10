@@ -28,6 +28,8 @@ export default function Gallery({ onStatsUpdate }) {
   const [archives,      setArchives]      = useState([])
   const [filterArchive, setFilterArchive] = useState('')
   const [filterEntity,  setFilterEntity]  = useState('')
+  const [mediums,       setMediums]       = useState([])
+  const [filterMedium,  setFilterMedium]  = useState('')
 
   const [perPage, setPerPage] = useState(50)
 
@@ -40,12 +42,14 @@ export default function Gallery({ onStatsUpdate }) {
       if (keyOnly)       params.key_evidence   = 'true'
       if (filterArchive) params.source_archive = filterArchive
       if (filterEntity)  params.entity_id      = filterEntity
+      if (filterMedium)  params.medium         = filterMedium
 
       // Groups share the same filter shape and sort params as documents.
       const groupParams = { page, per_page: perPage === 'all' ? 9999 : perPage, sort, order }
       if (keyOnly)       groupParams.key_evidence   = 'true'
       if (filterArchive) groupParams.source_archive = filterArchive
       if (filterEntity)  groupParams.entity_id      = filterEntity
+      if (filterMedium)  groupParams.medium         = filterMedium
 
       const [docsRes, groupsRes] = await Promise.all([
         api.getDocuments(params),
@@ -84,13 +88,14 @@ export default function Gallery({ onStatsUpdate }) {
     } finally {
       setLoading(false)
     }
-  }, [page, perPage, sort, order, keyOnly, filterArchive, filterEntity])
+  }, [page, perPage, sort, order, keyOnly, filterArchive, filterEntity, filterMedium])
 
   useEffect(() => { load() }, [load])
 
   // Load filter options once
   useEffect(() => {
     api.getArchives().then(r => setArchives(r.archives || [])).catch(() => {})
+    api.getMediums().then(r => setMediums(r.mediums || [])).catch(() => {})
   }, [])
 
   const toggleSelect = (selectKey) => {
@@ -208,6 +213,11 @@ export default function Gallery({ onStatsUpdate }) {
             <option value="">All Sources</option>
             <option value="__none__">— No Source</option>
             {archives.map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+          <select value={filterMedium} onChange={e => { setFilterMedium(e.target.value); setPage(1) }} style={{ width: 'auto' }}>
+            <option value="">All Mediums</option>
+            <option value="__none__">— No Medium</option>
+            {mediums.map(m => <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>)}
           </select>
           <EntityCombobox
             value={filterEntity}
