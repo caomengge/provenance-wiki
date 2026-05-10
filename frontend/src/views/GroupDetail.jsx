@@ -8,6 +8,7 @@ import InlineEdit from '../components/InlineEdit'
 import EvidenceFlag from '../components/EvidenceFlag'
 import { useJobStatus } from '../JobStatus'
 import TransactionEditor from '../components/TransactionEditor'
+import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 
 export default function GroupDetail() {
   const { id }     = useParams()
@@ -336,15 +337,19 @@ export default function GroupDetail() {
 
             {addingEntity && (
               <div style={{ background: 'var(--cream-card)', border: '1px solid var(--border)', borderRadius: '4px', padding: '0.75rem', marginBottom: '0.75rem' }}>
-                <input
-                  ref={entityNameRef}
-                  type="text"
-                  value={newEntityName}
-                  onChange={e => setNewEntityName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') addEntity(); if (e.key === 'Escape') setAddingEntity(false) }}
-                  placeholder="Entity name…"
-                  style={{ width: '100%', fontSize: '0.88rem', marginBottom: '0.5rem', boxSizing: 'border-box' }}
-                />
+                <div style={{ marginBottom: '0.5rem' }}>
+                  <EntityNameAutocomplete
+                    inputRef={entityNameRef}
+                    value={newEntityName}
+                    onChange={setNewEntityName}
+                    onPick={(ent) => {
+                      setNewEntityName(ent.name)
+                      if (ent.type) setNewEntityType(ent.type)
+                    }}
+                    onEnter={addEntity}
+                    onEscape={() => setAddingEntity(false)}
+                  />
+                </div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
                   <select
                     value={newEntityType}
