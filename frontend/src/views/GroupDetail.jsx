@@ -330,20 +330,6 @@ export default function GroupDetail() {
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '1rem' }}>
             <div>Created: {new Date(group.created_at).toLocaleDateString()}</div>
             <div>Updated: {new Date(group.updated_at).toLocaleDateString()}</div>
-            <div style={{ marginTop: '0.4rem' }}>
-              <button
-                className="btn btn-ghost"
-                style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}
-                onClick={() => setShowHistory(v => !v)}
-              >
-                {showHistory ? '▾ Hide History' : '▸ Show History'}
-              </button>
-            </div>
-            {showHistory && (
-              <div style={{ marginTop: '0.6rem', padding: '0.6rem', background: 'var(--cream-light, #faf7f2)', border: '1px solid var(--border)', borderRadius: '3px' }}>
-                <AuditHistory entityType="group" entityId={group.id} />
-              </div>
-            )}
           </div>
         </div>
 
@@ -447,6 +433,25 @@ export default function GroupDetail() {
 
             {(!group.entities || group.entities.length === 0) && !addingEntity && (
               <div style={{ fontSize: '0.85rem', color: 'var(--text-light)', fontStyle: 'italic' }}>No entities — click + Add to add one</div>
+            )}
+          </div>
+
+          <hr className="divider" style={{ margin: '1rem 0' }} />
+
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+            <div style={{ marginTop: '0.4rem' }}>
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '0.8rem', padding: '0.25rem 0.6rem' }}
+                onClick={() => setShowHistory(v => !v)}
+              >
+                {showHistory ? '▾ Hide History' : '▸ Show History'}
+              </button>
+            </div>
+            {showHistory && (
+              <div style={{ marginTop: '0.6rem', padding: '0.6rem', background: 'var(--cream-light, #faf7f2)', border: '1px solid var(--border)', borderRadius: '3px' }}>
+                <AuditHistory entityType="group" entityId={group.id} />
+              </div>
             )}
           </div>
         </div>
