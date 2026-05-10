@@ -7,6 +7,7 @@ const STATUS_TABS = [
   { key: 'err',      label: 'Failed' },
   { key: 'skipped',  label: 'Skipped' },
   { key: 'requeued', label: 'Re-queued' },
+  { key: 'grouped',  label: 'Grouped' },
 ]
 
 function formatTs(ts) {
@@ -30,6 +31,7 @@ export default function IngestLog() {
   const [counts,      setCounts]      = useState({})
   const [activeTab,   setActiveTab]   = useState('ok')
   const [files,       setFiles]       = useState([])
+  const [groups,      setGroups]      = useState([])
   const [loadingRun,  setLoadingRun]  = useState(false)
   const [loadingFiles,setLoadingFiles]= useState(false)
 
@@ -67,10 +69,17 @@ export default function IngestLog() {
   useEffect(() => {
     if (selectedId == null) return
     setLoadingFiles(true)
-    api.getIngestRunFiles(selectedId, activeTab)
-       .then(res => setFiles(res.files || []))
-       .catch(err => console.error(err))
-       .finally(() => setLoadingFiles(false))
+    if (activeTab === 'grouped') {
+      api.getIngestRunGroups(selectedId)
+         .then(res => setGroups(res.groups || []))
+         .catch(err => console.error(err))
+         .finally(() => setLoadingFiles(false))
+    } else {
+      api.getIngestRunFiles(selectedId, activeTab)
+         .then(res => setFiles(res.files || []))
+         .catch(err => console.error(err))
+         .finally(() => setLoadingFiles(false))
+    }
   }, [selectedId, activeTab])
 
   return (
@@ -158,7 +167,7 @@ export default function IngestLog() {
             {/* Tabs */}
             <div style={{ display: 'flex', gap: '0.25rem', borderBottom: '1px solid var(--border)', marginBottom: '0.5rem' }}>
               {STATUS_TABS.map(tab => {
-                const n = counts[tab.key] || 0
+                const n = tab.key === 'grouped' ? null : (counts[tab.key] || 0)
                 const isActive = activeTab === tab.key
                 return (
                   <button
@@ -176,18 +185,52 @@ export default function IngestLog() {
                       fontWeight: isActive ? 600 : 400,
                     }}
                   >
-                    {tab.label} <span style={{ color: 'var(--text-light)' }}>({n})</span>
+                    {tab.label}{n != null && <span style={{ color: 'var(--text-light)' }}> ({n})</span>}
                   </button>
                 )
               })}
             </div>
 
-            {/* File list */}
-            {loadingFiles && <div style={{ color: 'var(--text-light)' }}>Loading…</div>}
-            {!loadingFiles && files.length === 0 && (
+            {/* Grouped tab */}
+            {activeTab === 'grouped' && (
+              <>
+                {loadingFiles && <div style={{ color: 'var(--text-light)' }}>Loading…</div>}
+                {!loadingFiles && groups.length === 0 && (
+                  <div style={{ color: 'var(--text-light)', padding: '0.5rem' }}>
+                    No documents from this run have been added to a group yet.
+                  </div>
+                )}
+                {!loadingFiles && groups.length > 0 && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                    <thead>
+                      <tr style={{ textAlign: 'left', color: 'var(--text-light)' }}>
+                        <th style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Group</th>
+                        <th style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Pages from this run</th>
+                        <th style={{ padding: '0.4rem 0.5rem', borderBottom: '1px solid var(--border)' }}>Total pages</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groups.map(g => (
+                        <tr key={g.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>
+                            <Link to={`/groups/${g.id}`}>{g.title || `Group #${g.id}`}</Link>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>{g.pages_from_run}</td>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>{g.pages_in_group}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            )}
+
+            {/* File list (other tabs) */}
+            {activeTab !== 'grouped' && loadingFiles && <div style={{ color: 'var(--text-light)' }}>Loading…</div>}
+            {activeTab !== 'grouped' && !loadingFiles && files.length === 0 && (
               <div style={{ color: 'var(--text-light)', padding: '0.5rem' }}>No files in this category.</div>
             )}
-            {!loadingFiles && files.length > 0 && (
+            {activeTab !== 'grouped' && !loadingFiles && files.length > 0 && (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                 <thead>
                   <tr style={{ textAlign: 'left', color: 'var(--text-light)' }}>

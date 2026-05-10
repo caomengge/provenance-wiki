@@ -189,6 +189,18 @@ const api = {
     return request('GET', `/api/ingest/runs/${runId}/files?${sp.toString()}`)
   },
 
+  getIngestRunGroups: (runId) =>
+    request('GET', `/api/ingest/runs/${runId}/groups`),
+
+  getAudit: ({ entityType, entityId, runId, limit } = {}) => {
+    const sp = new URLSearchParams()
+    if (entityType) sp.set('entity_type', entityType)
+    if (entityId != null) sp.set('entity_id', entityId)
+    if (runId != null) sp.set('run_id', runId)
+    if (limit != null) sp.set('limit', limit)
+    return request('GET', `/api/audit?${sp.toString()}`)
+  },
+
   // ── Timeline ─────────────────────────────────────────────────────────────
   getTimeline: (params = {}) =>
     request('GET', '/api/timeline?' + new URLSearchParams(params)),

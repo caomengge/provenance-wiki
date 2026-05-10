@@ -269,15 +269,21 @@ def update_document(doc_id):
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400
 
+    from modules.db import record_audit_diff
+
     with get_db() as conn:
-        exists = conn.execute("SELECT 1 FROM documents WHERE id=?", (doc_id,)).fetchone()
-        if not exists:
+        old_row = conn.execute(
+            f"SELECT {', '.join(updates.keys())} FROM documents WHERE id=?", (doc_id,)
+        ).fetchone()
+        if not old_row:
             abort(404)
         set_clause = ", ".join(f"{k}=?" for k in updates)
         conn.execute(
             f"UPDATE documents SET {set_clause}, updated_at=datetime('now') WHERE id=?",
             list(updates.values()) + [doc_id]
         )
+        record_audit_diff(conn, entity_type="document", entity_id=doc_id,
+                          old_row=dict(old_row), new_values=updates)
 
     return jsonify({"ok": True, "updated": list(updates.keys())})
 
@@ -313,6 +319,10 @@ def create_link(doc_id):
                 return jsonify({"error": "Link already exists"}), 409
             raise
 
+        from modules.db import record_audit
+        record_audit(conn, entity_type="document", entity_id=doc_id, action="link",
+                     new={"target_id": target_id, "relationship_type": relationship_type})
+
     return jsonify({"ok": True, "link_id": link_id}), 201
 
 
@@ -324,13 +334,17 @@ def delete_document(doc_id):
 
     with get_db() as conn:
         doc = conn.execute(
-            "SELECT filename, sha256 FROM documents WHERE id=?", (doc_id,)
+            "SELECT filename, sha256, title FROM documents WHERE id=?", (doc_id,)
         ).fetchone()
         if not doc:
             abort(404)
 
         filename = doc["filename"]
         sha256   = doc["sha256"]
+
+        from modules.db import record_audit
+        record_audit(conn, entity_type="document", entity_id=doc_id, action="delete",
+                     old={"filename": filename, "title": doc["title"]})
 
         # Delete DB record — CASCADE removes document_entities, transactions, links, document_tags
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
@@ -389,7 +403,7 @@ def add_document_entity(doc_id):
         if not entity_id:
             return jsonify({"error": "Failed to create entity"}), 500
 
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO document_entities (document_id, entity_id, role) VALUES (?,?,?)",
             (doc_id, entity_id, role),
         )
@@ -397,6 +411,11 @@ def add_document_entity(doc_id):
         entity = conn.execute(
             "SELECT id, name, type FROM entities WHERE id=?", (entity_id,)
         ).fetchone()
+
+        if cur.rowcount > 0:
+            from modules.db import record_audit
+            record_audit(conn, entity_type="document", entity_id=doc_id, action="add_entity",
+                         new={"entity_id": entity_id, "name": entity["name"], "role": role})
 
     return jsonify({"ok": True, "entity": row_to_dict(entity), "role": role}), 201
 
@@ -406,12 +425,16 @@ def remove_document_entity(doc_id, entity_id):
     PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
 
     with get_db() as conn:
+        ent_name = conn.execute("SELECT name FROM entities WHERE id=?", (entity_id,)).fetchone()
         cur = conn.execute(
             "DELETE FROM document_entities WHERE document_id=? AND entity_id=?",
             (doc_id, entity_id),
         )
         if cur.rowcount == 0:
             abort(404)
+        from modules.db import record_audit
+        record_audit(conn, entity_type="document", entity_id=doc_id, action="remove_entity",
+                     old={"entity_id": entity_id, "name": ent_name["name"] if ent_name else None})
         conn.execute(
             """DELETE FROM entities WHERE id=?
                AND id NOT IN (SELECT entity_id FROM document_entities)
@@ -478,6 +501,9 @@ def wipe_document_metadata(doc_id):
     with get_db() as conn:
         if not conn.execute("SELECT 1 FROM documents WHERE id=?", (doc_id,)).fetchone():
             abort(404)
+
+        from modules.db import record_audit
+        record_audit(conn, entity_type="document", entity_id=doc_id, action="wipe")
 
         # Clear all extracted fields; keep annotation, tags, links untouched
         conn.execute(
@@ -558,11 +584,19 @@ def delete_link(doc_id, link_id):
     PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
 
     with get_db() as conn:
+        link = conn.execute(
+            "SELECT source_id, target_id, relationship_type FROM document_links WHERE id=?",
+            (link_id,)
+        ).fetchone()
         cur = conn.execute(
             "DELETE FROM document_links WHERE id=? AND (source_id=? OR target_id=?)",
             (link_id, doc_id, doc_id)
         )
         if cur.rowcount == 0:
             abort(404)
+        if link:
+            from modules.db import record_audit
+            record_audit(conn, entity_type="document", entity_id=doc_id, action="unlink",
+                         old=dict(link))
 
     return jsonify({"ok": True})

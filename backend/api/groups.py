@@ -136,12 +136,20 @@ def create_group():
         )
         group_id = cur.lastrowid
 
+        from modules.db import record_audit
+        record_audit(conn, entity_type="group", entity_id=group_id, action="create",
+                     new={"title": title or extracted.get("title"),
+                          "doc_ids": sorted_ids})
+
         # Assign pages
         for page_number, row in enumerate(pages_sorted, start=1):
             conn.execute(
                 "UPDATE documents SET group_id=?, page_number=? WHERE id=?",
                 (group_id, page_number, row["id"])
             )
+            record_audit(conn, entity_type="document", entity_id=row["id"],
+                         action="join_group",
+                         new={"group_id": group_id, "page_number": page_number})
 
         # Insert entities
         for ent in (extracted.get("entities") or []):
@@ -391,14 +399,21 @@ def update_group(group_id):
     if not updates:
         return jsonify({"error": "No valid fields to update"}), 400
 
+    from modules.db import record_audit_diff
+
     with get_db() as conn:
-        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+        old_row = conn.execute(
+            f"SELECT {', '.join(updates.keys())} FROM document_groups WHERE id=?", (group_id,)
+        ).fetchone()
+        if not old_row:
             abort(404)
         set_clause = ", ".join(f"{k}=?" for k in updates)
         conn.execute(
             f"UPDATE document_groups SET {set_clause}, updated_at=datetime('now') WHERE id=?",
             list(updates.values()) + [group_id]
         )
+        record_audit_diff(conn, entity_type="group", entity_id=group_id,
+                          old_row=dict(old_row), new_values=updates)
 
     return jsonify({"ok": True, "updated": list(updates.keys())})
 
@@ -410,8 +425,12 @@ def delete_group(group_id):
     _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
 
     with get_db() as conn:
-        if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
+        g = conn.execute("SELECT title FROM document_groups WHERE id=?", (group_id,)).fetchone()
+        if not g:
             abort(404)
+        from modules.db import record_audit
+        record_audit(conn, entity_type="group", entity_id=group_id, action="delete",
+                     old={"title": g["title"]})
         # ON DELETE SET NULL frees the pages automatically; CASCADE removes
         # group_entities, group_transactions, and group_tags.
         conn.execute("DELETE FROM document_groups WHERE id=?", (group_id,))
@@ -458,13 +477,17 @@ def add_group_entity(group_id):
         if not entity_id:
             return jsonify({"error": "Failed to create entity"}), 500
 
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO group_entities (group_id, entity_id, role) VALUES (?,?,?)",
             (group_id, entity_id, role),
         )
         entity = conn.execute(
             "SELECT id, name, type FROM entities WHERE id=?", (entity_id,)
         ).fetchone()
+        if cur.rowcount > 0:
+            from modules.db import record_audit
+            record_audit(conn, entity_type="group", entity_id=group_id, action="add_entity",
+                         new={"entity_id": entity_id, "name": entity["name"], "role": role})
 
     return jsonify({"ok": True, "entity": row_to_dict(entity), "role": role}), 201
 
@@ -474,12 +497,16 @@ def remove_group_entity(group_id, entity_id):
     _, _, _, _, _, get_db, _, _, _, _ = _get_deps()
 
     with get_db() as conn:
+        ent_name = conn.execute("SELECT name FROM entities WHERE id=?", (entity_id,)).fetchone()
         cur = conn.execute(
             "DELETE FROM group_entities WHERE group_id=? AND entity_id=?",
             (group_id, entity_id),
         )
         if cur.rowcount == 0:
             abort(404)
+        from modules.db import record_audit
+        record_audit(conn, entity_type="group", entity_id=group_id, action="remove_entity",
+                     old={"entity_id": entity_id, "name": ent_name["name"] if ent_name else None})
         conn.execute(
             """DELETE FROM entities WHERE id=?
                AND id NOT IN (SELECT entity_id FROM document_entities)

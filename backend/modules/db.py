@@ -244,6 +244,24 @@ CREATE TABLE IF NOT EXISTS ingest_run_files (
 CREATE INDEX IF NOT EXISTS idx_ingest_runs_started   ON ingest_runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_ingest_run_files_run  ON ingest_run_files(run_id, status);
 
+-- ── Audit events (history of edits to documents, groups, entities, etc.) ──────
+CREATE TABLE IF NOT EXISTS audit_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT    NOT NULL DEFAULT (datetime('now')),
+    actor        TEXT    NOT NULL DEFAULT 'user',  -- 'user' | 'ingest' | 'system'
+    entity_type  TEXT    NOT NULL,                 -- 'document' | 'group' | 'entity' | ...
+    entity_id    INTEGER NOT NULL,
+    action       TEXT    NOT NULL,                 -- 'create' | 'update' | 'delete' | 'link' | 'unlink' | 'add_entity' | 'remove_entity' | 'trash' | 'restore'
+    field        TEXT,                             -- for 'update' rows: the changed column
+    old_value    TEXT,
+    new_value    TEXT,
+    run_id       INTEGER REFERENCES ingest_runs(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_events(entity_type, entity_id, ts);
+CREATE INDEX IF NOT EXISTS idx_audit_ts     ON audit_events(ts);
+CREATE INDEX IF NOT EXISTS idx_audit_run    ON audit_events(run_id);
+
 CREATE INDEX IF NOT EXISTS idx_groups_date       ON document_groups(date_depicted);
 CREATE INDEX IF NOT EXISTS idx_groups_key        ON document_groups(is_key_evidence);
 CREATE INDEX IF NOT EXISTS idx_group_entities_g  ON group_entities(group_id);
@@ -430,6 +448,60 @@ def get_or_create_tag(conn: sqlite3.Connection, name: str, color: str = "#c9a84c
         "INSERT INTO tags (name, color) VALUES (?,?)", (name, color)
     )
     return cur.lastrowid
+
+
+# ── Audit log helper ──────────────────────────────────────────────────────────
+
+# Long-text fields get truncated in old/new_value to keep audit_events compact.
+_AUDIT_LONG_FIELDS = {"transcription", "description", "annotation",
+                      "raw_claude_response", "embedding_json"}
+_AUDIT_TRUNCATE = 1000
+
+
+def _audit_serialize(field: str | None, value) -> str | None:
+    """Render a field value for storage in audit_events."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        try:
+            value = json.dumps(value, ensure_ascii=False)
+        except Exception:
+            value = str(value)
+    if field in _AUDIT_LONG_FIELDS and len(value) > _AUDIT_TRUNCATE:
+        return value[:_AUDIT_TRUNCATE] + f"… [truncated, original length {len(value)}]"
+    return value
+
+
+def record_audit(conn: sqlite3.Connection, *, entity_type: str, entity_id: int,
+                 action: str, field: str = None, old=None, new=None,
+                 actor: str = "user", run_id: int = None) -> None:
+    """Append an audit_events row. Skips no-op updates where old == new."""
+    if action == "update" and old == new:
+        return
+    conn.execute(
+        """INSERT INTO audit_events
+           (actor, entity_type, entity_id, action, field, old_value, new_value, run_id)
+           VALUES (?,?,?,?,?,?,?,?)""",
+        (actor, entity_type, entity_id, action, field,
+         _audit_serialize(field, old), _audit_serialize(field, new), run_id),
+    )
+
+
+def record_audit_diff(conn: sqlite3.Connection, *, entity_type: str, entity_id: int,
+                      old_row: dict, new_values: dict, actor: str = "user",
+                      run_id: int = None) -> list:
+    """Convenience: emit one update row per field that actually changed.
+    Returns the list of changed field names."""
+    changed = []
+    for field, new in new_values.items():
+        old = old_row.get(field) if old_row else None
+        if old == new:
+            continue
+        record_audit(conn, entity_type=entity_type, entity_id=entity_id,
+                     action="update", field=field, old=old, new=new,
+                     actor=actor, run_id=run_id)
+        changed.append(field)
+    return changed
 
 
 def document_exists_by_sha256(sha256: str) -> bool:
