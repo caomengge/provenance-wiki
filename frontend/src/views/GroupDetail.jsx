@@ -187,9 +187,9 @@ export default function GroupDetail() {
             initial={!!group.is_key_evidence}
             onToggle={(v) => save('is_key_evidence', v ? 1 : 0)}
           />
-          {group.transcription && (
-            <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>📄 Transcription</button>
-          )}
+          <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>
+            📄 Transcription{!group.transcription && ' +'}
+          </button>
           <button
             className="btn btn-ghost"
             onClick={handleReExtract}
@@ -420,10 +420,14 @@ export default function GroupDetail() {
               <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Transcription</h2>
               <button onClick={() => setShowTranscription(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>✕</button>
             </div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: '0.92rem', lineHeight: 1.8, color: 'var(--text-body)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {group.transcription}
-              </pre>
+            <div style={{ overflowY: 'auto', flex: 1, fontSize: '0.92rem', lineHeight: 1.8, color: 'var(--text-body)' }}>
+              <InlineEdit
+                value={group.transcription}
+                onSave={v => save('transcription', v)}
+                multiline
+                placeholder="Type or paste transcription…"
+                emptyLabel="No transcription — click to add one"
+              />
             </div>
           </div>
         </div>
