@@ -314,17 +314,27 @@ def get_group(group_id):
 
                UNION ALL
 
+               -- One row per entity reached only via a child page. If the same
+               -- entity appears on multiple child pages, pick the earliest
+               -- page (MIN page_number, then MIN id) for source_page_id and
+               -- its role/context. MIN(de.role)/MIN(de.context) just makes
+               -- the choice deterministic when ties exist.
                SELECT e.id, e.name, e.type,
-                      de.role AS role,
-                      de.context AS context,
-                      d.id AS source_page_id
+                      MIN(de.role)    AS role,
+                      MIN(de.context) AS context,
+                      (SELECT d2.id FROM documents d2
+                       JOIN document_entities de2 ON de2.document_id = d2.id
+                       WHERE d2.group_id = ? AND d2.is_trashed = 0
+                         AND de2.entity_id = e.id
+                       ORDER BY d2.page_number, d2.id LIMIT 1) AS source_page_id
                FROM documents d
                JOIN document_entities de ON de.document_id = d.id
                JOIN entities e ON e.id = de.entity_id
                WHERE d.group_id = ? AND d.is_trashed = 0
                  AND e.id NOT IN (SELECT entity_id FROM group_entities
-                                  WHERE group_id = ?)""",
-            (group_id, group_id, group_id)
+                                  WHERE group_id = ?)
+               GROUP BY e.id, e.name, e.type""",
+            (group_id, group_id, group_id, group_id)
         ).fetchall())
 
         group["transactions"] = rows_to_list(conn.execute(
