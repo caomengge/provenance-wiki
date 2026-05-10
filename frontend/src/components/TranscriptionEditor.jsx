@@ -56,7 +56,7 @@ export default function TranscriptionEditor({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%', minHeight: 0 }}>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginBottom: '0.5rem' }}>
         {!editing && (
           <button className="btn btn-ghost" onClick={startEdit} style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}>
@@ -96,7 +96,7 @@ export default function TranscriptionEditor({
             style={{
               width: '100%',
               height: '100%',
-              minHeight: '300px',
+              minHeight: '60vh',
               boxSizing: 'border-box',
               fontFamily: 'inherit',
               fontSize: '0.92rem',
