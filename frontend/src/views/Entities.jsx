@@ -83,6 +83,7 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
   }
 
   return (
+    <>
     <tr style={{ background: 'var(--cream-bg)' }}>
       <td style={{ padding: '0.6rem 0.75rem' }}>
         <input
@@ -149,53 +150,70 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
             </span>
           )}
         </div>
-        {mergeOpen && (
+        {error && <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', color: '#b91c1c' }}>{error}</div>}
+      </td>
+    </tr>
+    {mergeOpen && (
+      <tr style={{ background: 'var(--cream-bg)' }}>
+        <td colSpan={4} style={{ padding: '0 0.75rem 0.8rem', borderTop: 'none' }}>
           <div style={{
-            marginTop: '0.5rem',
             display: 'flex',
             gap: '0.5rem',
             alignItems: 'flex-start',
             whiteSpace: 'normal',
-            minWidth: '360px',
-            width: '100%',
+            background: 'var(--cream-card, #faf7f2)',
+            border: '1px solid var(--border)',
+            borderRadius: '4px',
+            padding: '0.6rem 0.75rem',
           }}>
-            <div style={{ flex: 1, minWidth: '280px', position: 'relative' }}>
+            <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+                Merge <strong>{entity.name}</strong> into…
+              </label>
               <EntityNameAutocomplete
                 value={mergeTargetText}
                 onChange={(text) => {
                   setMergeTargetText(text)
-                  // Typing invalidates a previously picked target — require a fresh pick
                   setMergeTarget('')
                   setMergeTargetType('')
                 }}
                 onPick={(e) => {
-                  if (e.id === entity.id) return  // can't merge into self
+                  if (e.id === entity.id) return
                   setMergeTarget(String(e.id))
                   setMergeTargetText(e.name)
                   setMergeTargetType(e.type)
                 }}
-                placeholder="Search for target entity…"
+                placeholder="Type to search existing entities…"
                 style={{ width: '100%' }}
               />
               {mergeTarget && mergeTargetType && (
-                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
-                  Will merge into: {mergeTargetText} ({mergeTargetType})
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem', display: 'block' }}>
+                  Will merge into: <strong>{mergeTargetText}</strong> ({mergeTargetType})
                 </span>
               )}
             </div>
-            <button
-              className="btn btn-primary"
-              onClick={handleMerge}
-              disabled={!mergeTarget || merging}
-              style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem' }}
-            >
-              {merging ? '…' : 'Merge'}
-            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', marginTop: '1.1rem' }}>
+              <button
+                className="btn btn-primary"
+                onClick={handleMerge}
+                disabled={!mergeTarget || merging}
+                style={{ fontSize: '0.82rem', padding: '0.3rem 0.8rem' }}
+              >
+                {merging ? '…' : 'Merge'}
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={() => { setMergeOpen(false); setMergeTarget(''); setMergeTargetText(''); setMergeTargetType('') }}
+                style={{ fontSize: '0.78rem', padding: '0.2rem 0.6rem' }}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        )}
-        {error && <div style={{ marginTop: '0.3rem', fontSize: '0.78rem', color: '#b91c1c' }}>{error}</div>}
-      </td>
-    </tr>
+        </td>
+      </tr>
+    )}
+    </>
   )
 }
 
