@@ -5,7 +5,7 @@ import api from '../api/client'
  * Auto-saving annotation panel for a document.
  * Debounces saves 1.5s after the last keystroke.
  */
-export default function AnnotationPanel({ docId, initialValue = '' }) {
+export default function AnnotationPanel({ docId, initialValue = '', onSave }) {
   const [text, setText]       = useState(initialValue)
   const [saving, setSaving]   = useState(false)
   const [saved, setSaved]     = useState(false)
@@ -28,7 +28,12 @@ export default function AnnotationPanel({ docId, initialValue = '' }) {
   const save = async (val) => {
     try {
       setSaving(true)
-      await api.updateDocument(docId, { annotation: val })
+      if (onSave) {
+        // Caller owns the persistence (e.g. group page routes to /api/groups).
+        await onSave(val)
+      } else {
+        await api.updateDocument(docId, { annotation: val })
+      }
       setSaved(true)
     } catch (err) {
       setError(err.message)
