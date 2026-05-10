@@ -14,6 +14,8 @@ A local research wiki for museum archival provenance research. Processes photos 
 - **Draws a network graph** of relationships between people, objects, and institutions
 - **Answers questions** using a RAG (retrieval-augmented generation) pipeline grounded in your documents
 - **Exports PDFs** of timelines, entity histories, and document dossiers
+- **Tracks every ingestion** in a per-run log (processed / failed / re-queued / grouped)
+- **Records edit history** of every document and group, viewable in a Show History panel
 - **Works with Claude Desktop** via the built-in MCP server
 
 ---
@@ -165,6 +167,35 @@ Example questions:
 - "Which auction houses appear in the records?"
 - "Is there a gap in the provenance between 1933 and 1945?"
 
+### Ingest Log
+Every ingestion run is recorded. Open **Ingest Log** in the sidebar to see, per run:
+
+- **Ingested** — files successfully extracted (click through to the document)
+- **Failed** — files that errored, with the error message
+- **Re-queued** — previously-failed files that this run retried
+- **Grouped** — groups whose pages came from this run
+
+The list auto-refreshes while a run is in progress. The Skipped count (files already in the DB) is shown on the run summary but isn't recorded per-file — it would bloat the log without adding value.
+
+### History (Audit Log)
+Click **▸ Show History** at the bottom of any document or group detail page to see every edit recorded against that record: per-field updates with old and new values, entity link/unlink, document links, deletions, group membership changes, and the ingestion run that originally produced the record. Long text fields (transcription, description, annotation) are truncated at 1000 characters in the history to keep the table compact.
+
+### Entities & Merging
+The Entities page lists every unique person, object, and institution across the archive. Edit any row to rename, change type, merge into another entity, or delete it. The **Merge into…** picker is a search-as-you-type field so you can find candidates anywhere in the archive — it isn't limited to entities on the current page.
+
+### Transaction Quality
+The extractor is conservative about what counts as a transaction. To be recorded, a transaction must describe a specific exchange event with at least two of these anchor fields filled: `seller`, `buyer`, `date`, `price`, `auction_house`. Vague past-ownership mentions become entities with `role="previous owner"` instead. The threshold lives in `config.TRANSACTION_MIN_SCORE` (default 2; set to 0 to disable filtering).
+
+To purge weak transactions from an existing database:
+
+```bash
+cp data/provenance.db data/provenance.db.bak
+.venv/bin/python backend/scripts/clean_weak_transactions.py          # dry-run
+.venv/bin/python backend/scripts/clean_weak_transactions.py --apply  # actually delete
+```
+
+Deletions are recorded in `audit_events` so they can be inspected (or reversed via the SQL backup) later.
+
 ---
 
 ## PDF Export
@@ -247,10 +278,10 @@ The app is designed to stay responsive at ~500 documents on a laptop:
 All data is stored locally:
 - `photos/` — your original image files (never modified)
 - `data/thumbnails/` — generated JPEG thumbnails keyed by sha256 (regeneratable; safe to delete)
-- `data/provenance.db` — SQLite database with all extracted data
+- `data/provenance.db` — SQLite database with all extracted data (documents, groups, entities, tags, transactions, ingestion runs, audit/history events)
 - `data/mcp.log` — MCP server log
 
-To back up your research, copy the entire project folder. At minimum, back up `data/provenance.db` and `photos/`; thumbnails will rebuild on demand.
+To back up your research, copy the entire project folder. At minimum, back up `data/provenance.db` and `photos/`; thumbnails will rebuild on demand. The cleanup scripts (e.g. `clean_weak_transactions.py`) operate on `data/provenance.db`, so take a copy of it before running any `--apply` step.
 
 ---
 
