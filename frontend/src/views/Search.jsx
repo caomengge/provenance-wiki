@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
+import TagFilter from '../components/TagFilter'
 import api from '../api/client'
 
 export default function Search() {
@@ -19,6 +20,12 @@ export default function Search() {
   const [filterEntityName, setFilterEntityName] = useState('')
   const [archives,         setArchives]         = useState([])
   const [filterArchive,    setFilterArchive]    = useState('')
+  const [filterTags,       setFilterTags]       = useState(() => {
+    // Hydrate from URL on first render so a deep-link like /search?tag_id=3
+    // restores the chip even before TagFilter has loaded the tag list.
+    const ids = searchParams.getAll('tag_id')
+    return ids.map(id => ({ id, name: `#${id}`, color: '#888' }))
+  })
 
   // Selection / batch-edit
   const [selectMode,   setSelectMode]   = useState(false)
@@ -32,6 +39,17 @@ export default function Search() {
     api.getArchives().then(r => setArchives(r.archives || [])).catch(() => {})
   }, [])
 
+  // Reconcile placeholder tag chips (hydrated from URL with name=`#id`) with
+  // their real names/colors once the tag list is available.
+  useEffect(() => {
+    if (filterTags.length === 0) return
+    if (!filterTags.some(t => t.name?.startsWith('#'))) return
+    api.getTags().then(r => {
+      const byId = new Map((r.tags || []).map(t => [String(t.id), t]))
+      setFilterTags(prev => prev.map(t => byId.get(String(t.id)) || t))
+    }).catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch the entity name when filterEntity is set via URL (e.g. clicking an
   // entity card elsewhere) so we can show it in the active-filter chip.
   useEffect(() => {
@@ -42,13 +60,14 @@ export default function Search() {
   }, [filterEntity])
 
   const doSearch = useCallback(async (q, p = 1) => {
-    if (!q.trim() && !filterEntity && !filterArchive) return
+    if (!q.trim() && !filterEntity && !filterArchive && filterTags.length === 0) return
     setLoading(true)
     setHasSearched(true)
     try {
       const params = { q, mode, page: p, per_page: PER_PAGE }
-      if (filterEntity)  params.entity_id      = filterEntity
-      if (filterArchive) params.source_archive = filterArchive
+      if (filterEntity)        params.entity_id      = filterEntity
+      if (filterArchive)       params.source_archive = filterArchive
+      if (filterTags.length)   params.tag_id         = filterTags.map(t => t.id)
       const res = await api.search(params)
       setResults(res.results || [])
       setTotal(res.total || 0)
@@ -58,13 +77,14 @@ export default function Search() {
     } finally {
       setLoading(false)
     }
-  }, [mode, filterEntity, filterArchive])
+  }, [mode, filterEntity, filterArchive, filterTags])
 
-  // Auto-run if URL has q or entity_id
+  // Auto-run if URL has q, entity_id, or tag_id
   useEffect(() => {
-    const q   = searchParams.get('q') || ''
-    const eid = searchParams.get('entity_id') || ''
-    if (q || eid) {
+    const q    = searchParams.get('q') || ''
+    const eid  = searchParams.get('entity_id') || ''
+    const tids = searchParams.getAll('tag_id')
+    if (q || eid || tids.length) {
       setQuery(q)
       setFilterEntity(eid)
       doSearch(q, 1)
@@ -73,14 +93,25 @@ export default function Search() {
 
   // Re-run search whenever an active filter changes
   useEffect(() => {
-    if (filterEntity || filterArchive) {
+    if (filterEntity || filterArchive || filterTags.length) {
       doSearch(query, 1)
     }
-  }, [filterEntity, filterArchive, doSearch]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [filterEntity, filterArchive, filterTags, doSearch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keep URL in sync with the tag selection so the filter survives reloads
+  // and is shareable.
+  useEffect(() => {
+    const sp = new URLSearchParams(searchParams)
+    sp.delete('tag_id')
+    filterTags.forEach(t => sp.append('tag_id', String(t.id)))
+    setSearchParams(sp, { replace: true })
+  }, [filterTags]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSubmit = (e) => {
     e.preventDefault()
-    setSearchParams({ q: query })
+    const sp = new URLSearchParams(searchParams)
+    if (query) sp.set('q', query); else sp.delete('q')
+    setSearchParams(sp)
     doSearch(query, 1)
   }
 
@@ -192,6 +223,8 @@ export default function Search() {
               {archives.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
 
+            <TagFilter value={filterTags.map(t => t.id)} onChange={setFilterTags} />
+
             {filterEntity && (
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
@@ -254,6 +287,7 @@ export default function Search() {
               {query && <> for "<strong>{query}</strong>"</>}
               {activeEntityLabel  && ` · entity: ${activeEntityLabel}`}
               {activeArchiveLabel && ` · archive: ${activeArchiveLabel}`}
+              {filterTags.length > 0 && ` · tags: ${filterTags.map(t => t.name).join(', ')}`}
             </div>
 
             {results.map(doc => {
