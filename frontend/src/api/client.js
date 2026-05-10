@@ -177,6 +177,18 @@ const api = {
   getIngestStatus: () =>
     request('GET', '/api/ingest/status'),
 
+  getIngestRuns: (limit = 50) =>
+    request('GET', `/api/ingest/runs?limit=${limit}`),
+
+  getIngestRun: (runId) =>
+    request('GET', `/api/ingest/runs/${runId}`),
+
+  getIngestRunFiles: (runId, status) => {
+    const sp = new URLSearchParams()
+    if (status) sp.set('status', status)
+    return request('GET', `/api/ingest/runs/${runId}/files?${sp.toString()}`)
+  },
+
   // ── Timeline ─────────────────────────────────────────────────────────────
   getTimeline: (params = {}) =>
     request('GET', '/api/timeline?' + new URLSearchParams(params)),

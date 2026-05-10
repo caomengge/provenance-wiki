@@ -9,7 +9,8 @@ const NAV = [
   { to: '/timeline', icon: '↗', label: 'Timeline' },
   { to: '/network',  icon: '◉', label: 'Network' },
   { to: '/entities', icon: '⬡', label: 'Entities' },
-  { to: '/trash',    icon: '🗑', label: 'Trash', dividerBefore: true },
+  { to: '/ingest-log', icon: '☰', label: 'Ingest Log', dividerBefore: true },
+  { to: '/trash',    icon: '🗑', label: 'Trash' },
 ]
 
 const styles = {

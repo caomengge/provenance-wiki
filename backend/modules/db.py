@@ -218,6 +218,32 @@ CREATE TABLE IF NOT EXISTS group_tags (
     UNIQUE(group_id, tag_id)
 );
 
+-- ── Ingest runs (log of each ingestion batch) ────────────────────────────────
+CREATE TABLE IF NOT EXISTS ingest_runs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at    TEXT,
+    source_archive TEXT,
+    total          INTEGER NOT NULL DEFAULT 0,
+    processed      INTEGER NOT NULL DEFAULT 0,
+    skipped        INTEGER NOT NULL DEFAULT 0,
+    errors         INTEGER NOT NULL DEFAULT 0,
+    status         TEXT NOT NULL DEFAULT 'running'  -- 'running' | 'done' | 'crashed'
+);
+
+CREATE TABLE IF NOT EXISTS ingest_run_files (
+    run_id        INTEGER NOT NULL REFERENCES ingest_runs(id) ON DELETE CASCADE,
+    filename      TEXT    NOT NULL,
+    sha256        TEXT    NOT NULL,
+    status        TEXT    NOT NULL,   -- 'ok' | 'err' | 'skipped' | 'requeued'
+    error_message TEXT,
+    document_id   INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+    PRIMARY KEY (run_id, sha256)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_runs_started   ON ingest_runs(started_at);
+CREATE INDEX IF NOT EXISTS idx_ingest_run_files_run  ON ingest_run_files(run_id, status);
+
 CREATE INDEX IF NOT EXISTS idx_groups_date       ON document_groups(date_depicted);
 CREATE INDEX IF NOT EXISTS idx_groups_key        ON document_groups(is_key_evidence);
 CREATE INDEX IF NOT EXISTS idx_group_entities_g  ON group_entities(group_id);

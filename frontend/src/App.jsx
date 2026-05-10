@@ -10,6 +10,7 @@ import QA from './views/QA'
 import Trash from './views/Trash'
 import Entities from './views/Entities'
 import GroupDetail from './views/GroupDetail'
+import IngestLog from './views/IngestLog'
 import QAPanel from './components/QAPanel'
 import { JobStatusProvider } from './JobStatus'
 import api from './api/client'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/entities"    element={<Entities />} />
             <Route path="/trash"       element={<Trash />} />
             <Route path="/groups/:id"  element={<GroupDetail />} />
+            <Route path="/ingest-log"  element={<IngestLog />} />
           </Routes>
         </main>
 
