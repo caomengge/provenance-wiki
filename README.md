@@ -154,7 +154,7 @@ Select multiple pages in the Gallery and click **Group** to combine them into on
 - Filter by source archive; click an entity from the Entities page to filter results to that entity (chip with × to clear)
 
 ### Timeline
-Chronological view of all provenance events. Filter by date range or by entity (typeahead). Export as PDF.
+Chronological view of all provenance events. Filter by date range or by entity (typeahead). Every transaction event shows a coloured quality-score badge, and a **Min txn score** dropdown (0–5) lets you hide weak transactions without affecting document events. Export as PDF.
 
 ### Network Graph
 Interactive force-directed graph showing relationships between documents, people, objects, and institutions. Click nodes to see details.
@@ -192,7 +192,10 @@ Even so, the LLM sometimes emits weak rows. Every transaction in the UI carries 
 - **2/5** (amber): borderline — judge by content
 - **0–1/5** (red): probably a stray mention or stub. Edit it to add missing anchors, or delete it.
 
-A **Hide weak (< 2/5)** checkbox at the top of each Transactions list sweeps low-scoring rows from view without deleting them.
+The score badge appears wherever transactions are shown:
+
+- On document and group detail pages, each row carries the badge plus a **Hide weak (< 2/5)** checkbox above the list.
+- On the **Timeline**, each transaction event shows the badge, and a **Min txn score** dropdown (0–5) hides transactions below the chosen threshold without affecting document events.
 
 The backend can also auto-drop weak rows at ingest time via `config.TRANSACTION_MIN_SCORE` (default `0` = keep everything; set to `2` to silently drop weak transactions on ingest).
 
