@@ -35,11 +35,14 @@ const api = {
   deleteDocument: (id) =>
     request('DELETE', `/api/documents/${id}`),
 
-  getDocumentImageUrl: (id) =>
-    `/api/documents/${id}/image`,
+  // version is anything that changes when the underlying file changes
+  // (typically doc.updated_at or doc.sha256). Encoded as a query param so
+  // the browser refetches after a rotate instead of serving the cached image.
+  getDocumentImageUrl: (id, version) =>
+    `/api/documents/${id}/image${version ? `?v=${encodeURIComponent(version)}` : ''}`,
 
-  getDocumentThumbnailUrl: (id) =>
-    `/api/documents/${id}/thumbnail`,
+  getDocumentThumbnailUrl: (id, version) =>
+    `/api/documents/${id}/thumbnail${version ? `?v=${encodeURIComponent(version)}` : ''}`,
 
   rotateDocument: (id, direction) =>
     request('POST', `/api/documents/${id}/rotate`, { direction }),

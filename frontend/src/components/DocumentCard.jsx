@@ -43,9 +43,11 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
 
   const title  = doc.title || doc.filename || (isGroup ? `Group #${doc.id}` : `Document #${doc.id}`)
   const date   = doc.date_depicted || ''
+  // For groups we don't have the child page's updated_at on hand — fall back
+  // to the group's so at least edits to the group bust the cache.
   const imgUrl = isGroup && doc.first_page_id
-    ? api.getDocumentThumbnailUrl(doc.first_page_id)
-    : api.getDocumentThumbnailUrl(doc.id)
+    ? api.getDocumentThumbnailUrl(doc.first_page_id, doc.updated_at)
+    : api.getDocumentThumbnailUrl(doc.id, doc.updated_at)
   const href   = detailUrl
 
   // ── List view ──────────────────────────────────────────────────────────────
