@@ -94,7 +94,7 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
             {date && <span>{date}</span>}
             {doc.location && <span style={{ marginLeft: '0.5rem' }}>· {doc.location}</span>}
-            {doc.medium  && <span style={{ marginLeft: '0.5rem' }}>· {doc.medium}</span>}
+            {(doc.medium_category || doc.medium) && <span style={{ marginLeft: '0.5rem', textTransform: 'capitalize' }}>· {doc.medium_category || doc.medium}</span>}
           </div>
           {doc.snippet && (
             <div
@@ -196,9 +196,9 @@ export default function DocumentCard({ doc, view = 'grid', selectMode = false, s
           {date || 'Date unknown'}
           {doc.location ? ` · ${doc.location}` : ''}
         </div>
-        {(doc.medium || (!isGroup && doc.filename)) && (
-          <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginTop: '0.2rem' }}>
-            {doc.medium}{doc.medium && !isGroup && doc.filename ? ' · ' : ''}{!isGroup && doc.filename ? doc.filename : ''}
+        {(doc.medium_category || doc.medium || (!isGroup && doc.filename)) && (
+          <div style={{ fontSize: '0.76rem', color: 'var(--text-light)', marginTop: '0.2rem', textTransform: 'capitalize' }}>
+            {doc.medium_category || doc.medium}{(doc.medium_category || doc.medium) && !isGroup && doc.filename ? ' · ' : ''}{!isGroup && doc.filename ? <span style={{ textTransform: 'none' }}>{doc.filename}</span> : ''}
           </div>
         )}
       </div>

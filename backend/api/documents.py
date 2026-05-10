@@ -91,10 +91,16 @@ def list_documents():
                 wheres.append("d.source_archive = ?")
                 params.append(source_archive)
         if medium:
+            # `medium` here is actually the canonical category. Match against
+            # medium_category, falling back to legacy raw `medium` only when
+            # medium_category is NULL (rows ingested before the migration).
             if medium == "__none__":
-                wheres.append("(d.medium IS NULL OR d.medium = '')")
+                wheres.append(
+                    "((d.medium_category IS NULL OR d.medium_category = 'other') "
+                    "AND (d.medium IS NULL OR d.medium = ''))"
+                )
             else:
-                wheres.append("d.medium = ? COLLATE NOCASE")
+                wheres.append("d.medium_category = ?")
                 params.append(medium)
 
         join_sql  = " ".join(joins)
@@ -120,7 +126,7 @@ def list_documents():
         rows = conn.execute(
             f"""SELECT DISTINCT d.id, d.filename, d.title, d.date_depicted,
                        d.date_range_start, d.date_range_end, d.location,
-                       d.medium, d.is_key_evidence, d.annotation,
+                       d.medium, d.medium_category, d.is_key_evidence, d.annotation,
                        d.source_archive, d.created_at, d.updated_at
                 FROM documents d {join_sql} {where_sql}
                 {order_sql}
@@ -147,7 +153,7 @@ def get_document(doc_id):
         # vector) and raw_claude_response (often >5KB) on every detail request.
         doc = conn.execute(
             """SELECT id, filename, sha256, title, date_depicted, date_range_start,
-                      date_range_end, location, medium, dimensions, description,
+                      date_range_end, location, medium, medium_category, dimensions, description,
                       language, transcription, annotation, is_key_evidence,
                       is_trashed, source_archive, group_id, page_number,
                       created_at, updated_at
@@ -430,21 +436,24 @@ def list_archives():
 
 @bp.route("/api/mediums", methods=["GET"])
 def list_mediums():
-    """Distinct medium values across documents and groups, for the gallery
-    filter. Lower-cased and deduped so 'Letter' and 'letter' collapse."""
+    """Canonical medium categories present in the archive (documents + groups).
+    Returns the values from medium_taxonomy.CATEGORIES that actually appear
+    on at least one record, ordered by the taxonomy itself so the dropdown
+    is stable regardless of ingest order."""
     PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
+    from modules.medium_taxonomy import CATEGORIES
     with get_db() as conn:
         rows = conn.execute(
-            """SELECT DISTINCT LOWER(medium) AS medium FROM (
-                   SELECT medium FROM documents
-                   WHERE medium IS NOT NULL AND medium != ''
+            """SELECT DISTINCT medium_category AS c FROM (
+                   SELECT medium_category FROM documents
+                   WHERE medium_category IS NOT NULL AND medium_category != ''
                    UNION
-                   SELECT medium FROM document_groups
-                   WHERE medium IS NOT NULL AND medium != ''
-               )
-               ORDER BY medium COLLATE NOCASE"""
+                   SELECT medium_category FROM document_groups
+                   WHERE medium_category IS NOT NULL AND medium_category != ''
+               )"""
         ).fetchall()
-    return jsonify({"mediums": [r["medium"] for r in rows]})
+    present = {r["c"] for r in rows}
+    return jsonify({"mediums": [c for c in CATEGORIES if c in present]})
 
 
 @bp.route("/api/documents/<int:doc_id>/wipe", methods=["POST"])

@@ -179,7 +179,22 @@ export default function DocumentDetail() {
     { label: 'Source',     field: 'source_archive',    value: doc.source_archive,  suggestions: archives },
     { label: 'Date',       field: 'date_depicted',     value: doc.date_depicted   },
     { label: 'Location',   field: 'location',          value: doc.location        },
-    { label: 'Medium',     field: 'medium',            value: doc.medium          },
+    { label: 'Medium',     field: 'medium',            value: doc.medium,
+      // Show the canonical category as the primary label and the raw phrase
+      // (still user-editable) as a muted subtitle.
+      render: () => (
+        <div>
+          {doc.medium_category && (
+            <div style={{ textTransform: 'capitalize', fontWeight: 600, color: 'var(--text-body)' }}>
+              {doc.medium_category}
+            </div>
+          )}
+          <div style={{ fontStyle: doc.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+            <InlineEdit value={doc.medium} onSave={v => save('medium', v)} placeholder="Add medium detail…" />
+          </div>
+        </div>
+      )
+    },
     { label: 'Dimensions', field: 'dimensions',        value: doc.dimensions      },
     { label: 'Language',   field: 'language',          value: doc.language        },
   ]
@@ -393,15 +408,17 @@ export default function DocumentDetail() {
           {/* Metadata table */}
           <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'collapse' }}>
             <tbody>
-              {metaRows.map(({ label, field, value, readOnly, suggestions }) => (
+              {metaRows.map(({ label, field, value, readOnly, suggestions, render }) => (
                 <tr key={label}>
                   <td style={{ padding: '0.35rem 0', color: 'var(--text-muted)', fontWeight: 600, width: '120px', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.03em', verticalAlign: 'top', paddingTop: '0.45rem' }}>
                     {label}
                   </td>
                   <td style={{ padding: '0.35rem 0', color: 'var(--text-body)' }}>
-                    {readOnly
-                      ? value
-                      : <InlineEdit value={value} onSave={v => save(field, v)} placeholder={`Add ${label.toLowerCase()}…`} suggestions={suggestions} />
+                    {render
+                      ? render()
+                      : readOnly
+                        ? value
+                        : <InlineEdit value={value} onSave={v => save(field, v)} placeholder={`Add ${label.toLowerCase()}…`} suggestions={suggestions} />
                     }
                   </td>
                 </tr>

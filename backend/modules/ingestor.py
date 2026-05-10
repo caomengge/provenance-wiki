@@ -207,6 +207,13 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
     ]))
     embedding = generate_text_embedding(embed_text, api_key)
 
+    # Trust the LLM's category if it lands on a known canonical value, but
+    # always fall back to the substring mapper so junk/typos still resolve.
+    from modules.medium_taxonomy import categorize, CATEGORIES
+    raw_medium     = data.get("medium")
+    llm_category   = (data.get("medium_category") or "").strip().lower()
+    medium_category = llm_category if llm_category in CATEGORIES else categorize(raw_medium)
+
     with get_db() as conn:
         if existing_id:
             # UPDATE existing record in-place (preserves annotation, tags, links,
@@ -219,6 +226,7 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     date_range_end      = ?,
                     location            = ?,
                     medium              = ?,
+                    medium_category     = ?,
                     dimensions          = ?,
                     description         = ?,
                     language            = ?,
@@ -234,7 +242,8 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     data.get("date_range_start"),
                     data.get("date_range_end"),
                     data.get("location"),
-                    data.get("medium"),
+                    raw_medium,
+                    medium_category,
                     data.get("dimensions"),
                     data.get("description"),
                     data.get("language"),
@@ -251,9 +260,9 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
             cur = conn.execute(
                 """INSERT OR IGNORE INTO documents
                    (filename, sha256, title, date_depicted, date_range_start, date_range_end,
-                    location, medium, dimensions, description, language,
+                    location, medium, medium_category, dimensions, description, language,
                     raw_claude_response, transcription, is_key_evidence, embedding_json, source_archive)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     photo_path.name,
                     sha,
@@ -262,7 +271,8 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     data.get("date_range_start"),
                     data.get("date_range_end"),
                     data.get("location"),
-                    data.get("medium"),
+                    raw_medium,
+                    medium_category,
                     data.get("dimensions"),
                     data.get("description"),
                     data.get("language"),

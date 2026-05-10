@@ -303,6 +303,9 @@ def init_db():
         _migrate(conn, "ALTER TABLE documents ADD COLUMN group_id INTEGER REFERENCES document_groups(id) ON DELETE SET NULL")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN page_number INTEGER")
         _migrate(conn, "CREATE INDEX IF NOT EXISTS idx_documents_group ON documents(group_id)")
+        _migrate(conn, "ALTER TABLE documents ADD COLUMN medium_category TEXT")
+        _migrate(conn, "ALTER TABLE document_groups ADD COLUMN medium_category TEXT")
+        _backfill_medium_category(conn)
 
         # Sweep any pre-existing orphan entities and tags left behind by
         # deletions that occurred before the cleanup logic was added.
@@ -325,6 +328,21 @@ def _migrate(conn: sqlite3.Connection, sql: str):
         conn.execute(sql)
     except sqlite3.OperationalError:
         pass  # Column already exists
+
+
+def _backfill_medium_category(conn: sqlite3.Connection):
+    """Populate documents.medium_category and document_groups.medium_category
+    for any rows where it is NULL, using the canonical taxonomy mapping."""
+    from modules.medium_taxonomy import categorize
+    for table in ("documents", "document_groups"):
+        rows = conn.execute(
+            f"SELECT id, medium FROM {table} WHERE medium_category IS NULL"
+        ).fetchall()
+        for r in rows:
+            conn.execute(
+                f"UPDATE {table} SET medium_category = ? WHERE id = ?",
+                (categorize(r["medium"]), r["id"]),
+            )
 
 
 # ── Helper utilities ──────────────────────────────────────────────────────────

@@ -159,7 +159,20 @@ export default function GroupDetail() {
   const metaRows = [
     { label: 'Date',       field: 'date_depicted',  value: group.date_depicted  },
     { label: 'Location',   field: 'location',        value: group.location       },
-    { label: 'Medium',     field: 'medium',          value: group.medium         },
+    { label: 'Medium',     field: 'medium',          value: group.medium,
+      render: () => (
+        <div>
+          {group.medium_category && (
+            <div style={{ textTransform: 'capitalize', fontWeight: 600, color: 'var(--text-body)' }}>
+              {group.medium_category}
+            </div>
+          )}
+          <div style={{ fontStyle: group.medium ? 'italic' : 'normal', color: 'var(--text-muted)', fontSize: '0.9em' }}>
+            <InlineEdit value={group.medium} onSave={v => save('medium', v)} placeholder="Add medium detail…" />
+          </div>
+        </div>
+      )
+    },
     { label: 'Dimensions', field: 'dimensions',      value: group.dimensions     },
     { label: 'Language',   field: 'language',        value: group.language       },
     { label: 'Source',     field: 'source_archive',  value: group.source_archive },
@@ -272,13 +285,15 @@ export default function GroupDetail() {
           {/* Metadata table */}
           <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'collapse', marginBottom: '1.5rem' }}>
             <tbody>
-              {metaRows.map(({ label, field, value }) => (
+              {metaRows.map(({ label, field, value, render }) => (
                 <tr key={label}>
                   <td style={{ padding: '0.35rem 0', color: 'var(--text-muted)', fontWeight: 600, width: '120px', fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.03em', verticalAlign: 'top', paddingTop: '0.45rem' }}>
                     {label}
                   </td>
                   <td style={{ padding: '0.35rem 0', color: 'var(--text-body)' }}>
-                    <InlineEdit value={value} onSave={v => save(field, v)} placeholder={`Add ${label.toLowerCase()}…`} />
+                    {render
+                      ? render()
+                      : <InlineEdit value={value} onSave={v => save(field, v)} placeholder={`Add ${label.toLowerCase()}…`} />}
                   </td>
                 </tr>
               ))}
