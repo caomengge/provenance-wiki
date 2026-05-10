@@ -172,10 +172,14 @@ def get_document(doc_id):
                WHERE de.document_id = ?""", (doc_id,)
         ).fetchall())
 
-        doc["transactions"] = rows_to_list(conn.execute(
-            "SELECT * FROM transactions WHERE document_id = ? ORDER BY date",
-            (doc_id,)
-        ).fetchall())
+        from modules.extractor import transaction_score
+        doc["transactions"] = [
+            {**dict(r), "score": transaction_score(dict(r))}
+            for r in conn.execute(
+                "SELECT * FROM transactions WHERE document_id = ? ORDER BY date",
+                (doc_id,)
+            ).fetchall()
+        ]
 
         doc["tags"] = rows_to_list(conn.execute(
             """SELECT t.id, t.name, t.color FROM document_tags dt

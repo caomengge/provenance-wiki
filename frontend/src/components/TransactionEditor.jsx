@@ -80,11 +80,43 @@ function TransactionForm({ data, onChange, onSave, onCancel, onDelete, saving })
   )
 }
 
+function scoreColor(score) {
+  if (score >= 3) return { bg: '#dcf5e3', border: '#3a9d5a', text: '#1f6b3a' }   // green
+  if (score === 2) return { bg: '#fcf3d4', border: '#b88a1f', text: '#7a5a0e' }  // amber
+  return { bg: '#fbe1e1', border: '#c14a4a', text: '#871f1f' }                   // red 0-1
+}
+
+function ScoreBadge({ score }) {
+  const c = scoreColor(score)
+  return (
+    <span
+      title={`Quality score: ${score} of 5 anchor fields (seller, buyer, date, price, auction_house) present`}
+      style={{
+        display: 'inline-block',
+        fontSize: '0.7rem',
+        fontWeight: 700,
+        padding: '0.1rem 0.4rem',
+        borderRadius: '3px',
+        background: c.bg,
+        border: `1px solid ${c.border}`,
+        color: c.text,
+        whiteSpace: 'nowrap',
+        marginLeft: '0.4rem',
+      }}
+    >
+      {score}/5
+    </span>
+  )
+}
+
 function TransactionRow({ t, onEdit }) {
   return (
     <div style={{ borderLeft: '3px solid var(--gold)', paddingLeft: '0.75rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
       <div style={{ flex: 1 }}>
-        {t.date && <div style={{ fontWeight: 600, color: 'var(--navy)' }}>{t.date}</div>}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '0.25rem' }}>
+          {t.date && <span style={{ fontWeight: 600, color: 'var(--navy)' }}>{t.date}</span>}
+          {typeof t.score === 'number' && <ScoreBadge score={t.score} />}
+        </div>
         {(t.seller || t.buyer) && (
           <div style={{ fontSize: '0.9rem' }}>
             {t.seller && <span><em>Seller:</em> {t.seller}</span>}
@@ -117,7 +149,11 @@ export default function TransactionEditor({ transactions: initial = [], docId, g
   const [editingId, setEditingId]       = useState(null)   // txn id or 'new'
   const [draft, setDraft]               = useState(null)
   const [saving, setSaving]             = useState(false)
+  const [hideWeak, setHideWeak]         = useState(false)
   const isGroup = !!groupId
+
+  const weakCount = transactions.filter(t => typeof t.score === 'number' && t.score < 2).length
+  const visible = hideWeak ? transactions.filter(t => (t.score ?? 5) >= 2) : transactions
 
   const startEdit = (t) => { setEditingId(t.id); setDraft({ ...t }) }
   const startNew  = ()  => { setEditingId('new'); setDraft({ ...EMPTY }) }
@@ -163,11 +199,19 @@ export default function TransactionEditor({ transactions: initial = [], docId, g
 
   return (
     <div style={{ marginBottom: '1.5rem' }}>
-      <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-        Transactions ({transactions.length})
-      </h3>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', margin: 0 }}>
+          Transactions ({hideWeak ? `${visible.length} of ${transactions.length}` : transactions.length})
+        </h3>
+        {weakCount > 0 && (
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={hideWeak} onChange={e => setHideWeak(e.target.checked)} />
+            Hide weak (&lt; 2/5) · {weakCount}
+          </label>
+        )}
+      </div>
 
-      {transactions.map(t =>
+      {visible.map(t =>
         editingId === t.id ? (
           <TransactionForm
             key={t.id}
