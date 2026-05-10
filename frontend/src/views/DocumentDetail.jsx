@@ -171,7 +171,10 @@ export default function DocumentDetail() {
   if (error)   return <div style={{ padding: '2rem', color: 'var(--rust)' }}>Error: {error}</div>
   if (!doc)    return null
 
-  const imgUrl = api.getDocumentImageUrl(doc.id)
+  // Bust on doc.updated_at so any rotate/edit naturally invalidates the
+  // browser cache; imgCacheBust adds an extra bump for in-page rotations
+  // before the doc state has been re-fetched.
+  const imgUrl = api.getDocumentImageUrl(doc.id, `${doc.updated_at}-${imgCacheBust}`)
 
   // ── Metadata rows config ────────────────────────────────────────────────────
 
@@ -367,7 +370,7 @@ export default function DocumentDetail() {
           <div style={{ position: 'relative', marginBottom: '1.5rem' }}>
             <div style={{ cursor: 'zoom-in' }} onClick={() => setImgZoomed(true)}>
               <img
-                src={`${imgUrl}?v=${imgCacheBust}`}
+                src={imgUrl}
                 alt={doc.title || doc.filename}
                 style={{
                   maxWidth: '100%',
