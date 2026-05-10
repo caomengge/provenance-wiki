@@ -39,6 +39,13 @@ INGEST_MAX_TOKENS    = 4096       # max output tokens for extraction prompt
 SUPPORTED_EXTS       = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 MULTIPAGE_MAX_PAGES  = 50         # max pages per document group
 
+# Minimum number of meaningful fields (of seller, buyer, date, price,
+# auction_house) required for an LLM-extracted transaction to be kept.
+# Set to 0 to disable filtering. Default 2: drops "$400 mentioned" or
+# "previously owned by X" stubs but keeps real exchanges with at least
+# two anchor points.
+TRANSACTION_MIN_SCORE = 2
+
 # ── API ───────────────────────────────────────────────────────────────────────
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE     = 200

@@ -319,8 +319,9 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     (doc_id, entity_id, ent.get("role"), ent.get("context")),
                 )
 
-        # Insert transactions
-        for txn in (data.get("transactions") or []):
+        # Insert transactions (filtered for quality — see config.TRANSACTION_MIN_SCORE)
+        from modules.extractor import filter_transactions
+        for txn in filter_transactions(data.get("transactions") or []):
             conn.execute(
                 """INSERT INTO transactions
                    (document_id, seller, buyer, date, price, currency,

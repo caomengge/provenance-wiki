@@ -162,8 +162,9 @@ def create_group():
                     (group_id, entity_id, ent.get("role"), ent.get("context"))
                 )
 
-        # Insert transactions
-        for txn in (extracted.get("transactions") or []):
+        # Insert transactions (filtered for quality — see config.TRANSACTION_MIN_SCORE)
+        from modules.extractor import filter_transactions
+        for txn in filter_transactions(extracted.get("transactions") or []):
             conn.execute(
                 """INSERT INTO group_transactions
                    (group_id, seller, buyer, date, price, currency,
@@ -612,7 +613,8 @@ def re_extract_group(group_id):
                     (group_id, entity_id, ent.get("role"), ent.get("context"))
                 )
 
-        for txn in (extracted.get("transactions") or []):
+        from modules.extractor import filter_transactions
+        for txn in filter_transactions(extracted.get("transactions") or []):
             conn.execute(
                 """INSERT INTO group_transactions
                    (group_id, seller, buyer, date, price, currency,
