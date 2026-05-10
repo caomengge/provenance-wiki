@@ -363,10 +363,14 @@ def get_group(group_id):
             (group_id, group_id, group_id, group_id)
         ).fetchall())
 
-        group["transactions"] = rows_to_list(conn.execute(
-            "SELECT * FROM group_transactions WHERE group_id=? ORDER BY date",
-            (group_id,)
-        ).fetchall())
+        from modules.extractor import transaction_score
+        group["transactions"] = [
+            {**dict(r), "score": transaction_score(dict(r))}
+            for r in conn.execute(
+                "SELECT * FROM group_transactions WHERE group_id=? ORDER BY date",
+                (group_id,)
+            ).fetchall()
+        ]
 
         group["tags"] = rows_to_list(conn.execute(
             """SELECT t.id, t.name, t.color FROM group_tags gt

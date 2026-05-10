@@ -184,14 +184,24 @@ Click **▸ Show History** at the bottom of any document or group detail page to
 The Entities page lists every unique person, object, and institution across the archive. Edit any row to rename, change type, merge into another entity, or delete it. The **Merge into…** picker is a search-as-you-type field so you can find candidates anywhere in the archive — it isn't limited to entities on the current page.
 
 ### Transaction Quality
-The extractor is conservative about what counts as a transaction. To be recorded, a transaction must describe a specific exchange event with at least two of these anchor fields filled: `seller`, `buyer`, `date`, `price`, `auction_house`. Vague past-ownership mentions become entities with `role="previous owner"` instead. The threshold lives in `config.TRANSACTION_MIN_SCORE` (default 2; set to 0 to disable filtering).
+The extractor prompt asks Claude to only emit a transaction for a specific exchange event (sale, purchase, auction, donation, bequest, consignment, gift). Vague past-ownership mentions become entities with `role="previous owner"` instead.
 
-To purge weak transactions from an existing database:
+Even so, the LLM sometimes emits weak rows. Every transaction in the UI carries a **quality score** — how many of `seller`, `buyer`, `date`, `price`, `auction_house` are filled, shown as a coloured badge `0/5`–`5/5`:
+
+- **3–5/5** (green): a well-anchored transaction
+- **2/5** (amber): borderline — judge by content
+- **0–1/5** (red): probably a stray mention or stub. Edit it to add missing anchors, or delete it.
+
+A **Hide weak (< 2/5)** checkbox at the top of each Transactions list sweeps low-scoring rows from view without deleting them.
+
+The backend can also auto-drop weak rows at ingest time via `config.TRANSACTION_MIN_SCORE` (default `0` = keep everything; set to `2` to silently drop weak transactions on ingest).
+
+To bulk-delete existing weak transactions across the whole archive:
 
 ```bash
 cp data/provenance.db data/provenance.db.bak
-.venv/bin/python backend/scripts/clean_weak_transactions.py          # dry-run
-.venv/bin/python backend/scripts/clean_weak_transactions.py --apply  # actually delete
+.venv/bin/python backend/scripts/clean_weak_transactions.py --min-score 2          # dry-run
+.venv/bin/python backend/scripts/clean_weak_transactions.py --min-score 2 --apply  # delete
 ```
 
 Deletions are recorded in `audit_events` so they can be inspected (or reversed via the SQL backup) later.

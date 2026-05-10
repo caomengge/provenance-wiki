@@ -14,11 +14,21 @@ Routes (document groups):
 
 from flask import Blueprint, abort, jsonify, request
 from modules.db import get_db
+from modules.extractor import transaction_score
 
 bp = Blueprint("transactions", __name__)
 
 _ALLOWED = {"seller", "buyer", "date", "price", "currency",
             "auction_house", "lot_number", "location", "notes"}
+
+
+def enrich(row) -> dict:
+    """Return a transaction row as a dict with a computed quality `score`."""
+    if row is None:
+        return None
+    d = dict(row)
+    d["score"] = transaction_score(d)
+    return d
 
 
 def _to_float(value):
@@ -57,7 +67,7 @@ def create_doc_transaction(doc_id):
              data.get("lot_number"), data.get("location"), data.get("notes")),
         )
         row = conn.execute("SELECT * FROM transactions WHERE id=?", (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    return jsonify(enrich(row)), 201
 
 
 @bp.patch("/api/transactions/<int:txn_id>")
@@ -72,7 +82,7 @@ def update_doc_transaction(txn_id):
         row = conn.execute("SELECT * FROM transactions WHERE id=?", (txn_id,)).fetchone()
     if not row:
         abort(404)
-    return jsonify(dict(row))
+    return jsonify(enrich(row))
 
 
 @bp.delete("/api/transactions/<int:txn_id>")
@@ -102,7 +112,7 @@ def create_group_transaction(group_id):
              data.get("lot_number"), data.get("location"), data.get("notes")),
         )
         row = conn.execute("SELECT * FROM group_transactions WHERE id=?", (cur.lastrowid,)).fetchone()
-    return jsonify(dict(row)), 201
+    return jsonify(enrich(row)), 201
 
 
 @bp.patch("/api/group_transactions/<int:txn_id>")
@@ -117,7 +127,7 @@ def update_group_transaction(txn_id):
         row = conn.execute("SELECT * FROM group_transactions WHERE id=?", (txn_id,)).fetchone()
     if not row:
         abort(404)
-    return jsonify(dict(row))
+    return jsonify(enrich(row))
 
 
 @bp.delete("/api/group_transactions/<int:txn_id>")
