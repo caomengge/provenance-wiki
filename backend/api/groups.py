@@ -195,6 +195,7 @@ def list_groups():
     date_from      = request.args.get("date_from")
     date_to        = request.args.get("date_to")
     source_archive = request.args.get("source_archive")
+    medium         = request.args.get("medium")
 
     sort  = request.args.get("sort", "created_at")
     order = "DESC" if request.args.get("order", "desc").lower() == "desc" else "ASC"
@@ -236,6 +237,12 @@ def list_groups():
         else:
             wheres.append("g.source_archive = ?")
             params.append(source_archive)
+    if medium:
+        if medium == "__none__":
+            wheres.append("(g.medium IS NULL OR g.medium = '')")
+        else:
+            wheres.append("g.medium = ? COLLATE NOCASE")
+            params.append(medium)
 
     join_sql  = " ".join(joins)
     where_sql = "WHERE " + " AND ".join(wheres)

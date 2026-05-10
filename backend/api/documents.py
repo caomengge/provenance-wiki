@@ -57,6 +57,7 @@ def list_documents():
     sort            = request.args.get("sort", "created_at")
     order           = "DESC" if request.args.get("order", "desc").lower() == "desc" else "ASC"
     source_archive  = request.args.get("source_archive")
+    medium          = request.args.get("medium")
 
     # Whitelist sort columns
     allowed_sort = {"created_at", "date_depicted", "title", "updated_at"}
@@ -89,6 +90,12 @@ def list_documents():
             else:
                 wheres.append("d.source_archive = ?")
                 params.append(source_archive)
+        if medium:
+            if medium == "__none__":
+                wheres.append("(d.medium IS NULL OR d.medium = '')")
+            else:
+                wheres.append("d.medium = ? COLLATE NOCASE")
+                params.append(medium)
 
         join_sql  = " ".join(joins)
         where_sql = "WHERE " + " AND ".join(wheres)
@@ -419,6 +426,25 @@ def list_archives():
                ORDER BY source_archive COLLATE NOCASE"""
         ).fetchall()
     return jsonify({"archives": [r["source_archive"] for r in rows]})
+
+
+@bp.route("/api/mediums", methods=["GET"])
+def list_mediums():
+    """Distinct medium values across documents and groups, for the gallery
+    filter. Lower-cased and deduped so 'Letter' and 'letter' collapse."""
+    PHOTOS_DIR, _, _, get_db, _, _ = _get_deps()
+    with get_db() as conn:
+        rows = conn.execute(
+            """SELECT DISTINCT LOWER(medium) AS medium FROM (
+                   SELECT medium FROM documents
+                   WHERE medium IS NOT NULL AND medium != ''
+                   UNION
+                   SELECT medium FROM document_groups
+                   WHERE medium IS NOT NULL AND medium != ''
+               )
+               ORDER BY medium COLLATE NOCASE"""
+        ).fetchall()
+    return jsonify({"mediums": [r["medium"] for r in rows]})
 
 
 @bp.route("/api/documents/<int:doc_id>/wipe", methods=["POST"])

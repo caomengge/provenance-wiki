@@ -168,6 +168,9 @@ const api = {
   getArchives: () =>
     request('GET', '/api/archives'),
 
+  getMediums: () =>
+    request('GET', '/api/mediums'),
+
   getIngestStatus: () =>
     request('GET', '/api/ingest/status'),
 
