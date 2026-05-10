@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
 
 const TYPE_COLORS = {
   person:      { bg: '#2563eb22', border: '#2563eb66', text: '#1d4ed8' },
@@ -31,12 +32,14 @@ function TypeBadge({ type }) {
 }
 
 /** Inline edit row – shown when editing */
-function EditRow({ entity, allEntities, onSave, onCancel, onMerge, onDelete }) {
+function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
   const [name, setName] = useState(entity.name)
   const [type, setType] = useState(entity.type)
   const [saving, setSaving] = useState(false)
   const [mergeOpen, setMergeOpen] = useState(false)
-  const [mergeTarget, setMergeTarget] = useState('')
+  const [mergeTarget, setMergeTarget] = useState('')      // id (as string) of picked target
+  const [mergeTargetText, setMergeTargetText] = useState('') // current typed text
+  const [mergeTargetType, setMergeTargetType] = useState('')
   const [merging, setMerging] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -78,8 +81,6 @@ function EditRow({ entity, allEntities, onSave, onCancel, onMerge, onDelete }) {
       setDeleting(false)
     }
   }
-
-  const others = allEntities.filter(e => e.id !== entity.id)
 
   return (
     <tr style={{ background: 'var(--cream-bg)' }}>
@@ -150,16 +151,29 @@ function EditRow({ entity, allEntities, onSave, onCancel, onMerge, onDelete }) {
         </div>
         {mergeOpen && (
           <div style={{ marginTop: '0.4rem', display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-            <select
-              value={mergeTarget}
-              onChange={e => setMergeTarget(e.target.value)}
-              style={{ flex: 1, fontFamily: 'var(--font-serif)', fontSize: '0.82rem' }}
-            >
-              <option value="">— merge this entity into… —</option>
-              {others.map(e => (
-                <option key={e.id} value={e.id}>{e.name} ({e.type})</option>
-              ))}
-            </select>
+            <div style={{ flex: 1, position: 'relative' }}>
+              <EntityNameAutocomplete
+                value={mergeTargetText}
+                onChange={(text) => {
+                  setMergeTargetText(text)
+                  // Typing invalidates a previously picked target — require a fresh pick
+                  setMergeTarget('')
+                  setMergeTargetType('')
+                }}
+                onPick={(e) => {
+                  if (e.id === entity.id) return  // can't merge into self
+                  setMergeTarget(String(e.id))
+                  setMergeTargetText(e.name)
+                  setMergeTargetType(e.type)
+                }}
+                placeholder="Search for target entity…"
+              />
+              {mergeTarget && mergeTargetType && (
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '0.2rem', display: 'block' }}>
+                  Will merge into: {mergeTargetText} ({mergeTargetType})
+                </span>
+              )}
+            </div>
             <button
               className="btn btn-primary"
               onClick={handleMerge}
@@ -319,7 +333,6 @@ export default function Entities() {
                   <EditRow
                     key={entity.id}
                     entity={entity}
-                    allEntities={entities}
                     onSave={handleSave}
                     onCancel={() => setEditingId(null)}
                     onMerge={handleMerge}
