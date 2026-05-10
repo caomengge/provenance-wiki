@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import EntityCombobox from '../components/EntityCombobox'
+import ScoreBadge from '../components/TransactionScoreBadge'
 
 function TimelineEvent({ event, onDocClick }) {
   const isKey = event.is_key_evidence
@@ -71,9 +72,12 @@ function TimelineEvent({ event, onDocClick }) {
               {event.label || event.doc_title || 'Event'}
             </span>
           </div>
-          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', flexShrink: 0, marginTop: '2px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            {isTxn ? 'Transaction' : event.medium || 'Document'}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexShrink: 0, marginTop: '2px' }}>
+            {isTxn && typeof event.score === 'number' && <ScoreBadge score={event.score} />}
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {isTxn ? 'Transaction' : event.medium || 'Document'}
+            </span>
+          </div>
         </div>
 
         {isTxn && (
@@ -108,6 +112,7 @@ export default function Timeline() {
   const [dateTo, setDateTo]     = useState('')
   const [filterMode, setFilterMode] = useState('all')  // 'all' | 'transactions' | 'key'
   const [filterEntity, setFilterEntity] = useState('')
+  const [minTxnScore, setMinTxnScore] = useState(0)    // 0 = show all transactions
   const navigate = useNavigate()
 
   const load = useCallback(async () => {
@@ -131,10 +136,15 @@ export default function Timeline() {
   const events = data?.dated_events || []
 
   const filtered = events.filter(e => {
-    if (filterMode === 'transactions') return e.type === 'transaction'
-    if (filterMode === 'key') return e.is_key_evidence
+    if (filterMode === 'transactions' && e.type !== 'transaction') return false
+    if (filterMode === 'key' && !e.is_key_evidence) return false
+    // Apply min-score only to transactions; document events are unaffected.
+    if (e.type === 'transaction' && minTxnScore > 0 && (e.score ?? 0) < minTxnScore) return false
     return true
   })
+
+  const txnEvents = events.filter(e => e.type === 'transaction')
+  const hiddenTxn = txnEvents.length - txnEvents.filter(e => (e.score ?? 0) >= minTxnScore).length
 
   // Group by year
   const byYear = {}
@@ -182,7 +192,27 @@ export default function Timeline() {
           />
           <button className="btn btn-primary" onClick={load}>Apply</button>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem' }}>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.3rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+              Min txn score
+              <select
+                value={minTxnScore}
+                onChange={e => setMinTxnScore(parseInt(e.target.value, 10))}
+                style={{ fontSize: '0.82rem', padding: '0.2rem 0.3rem' }}
+              >
+                <option value={0}>0 (all)</option>
+                <option value={1}>≥ 1</option>
+                <option value={2}>≥ 2</option>
+                <option value={3}>≥ 3</option>
+                <option value={4}>≥ 4</option>
+                <option value={5}>= 5</option>
+              </select>
+            </label>
+            {minTxnScore > 0 && hiddenTxn > 0 && (
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                ({hiddenTxn} txn hidden)
+              </span>
+            )}
             {['all', 'transactions', 'key'].map(m => (
               <button
                 key={m}
