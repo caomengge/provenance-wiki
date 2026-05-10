@@ -695,7 +695,7 @@ export default function DocumentDetail() {
       {/* Transcription modal */}
       {showTranscription && (
         <div className="modal-overlay" onClick={() => setShowTranscription(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ width: '90vw', maxWidth: '1100px', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
               <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Transcription</h2>
               <button onClick={() => setShowTranscription(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem', color: 'var(--text-muted)' }}>✕</button>
