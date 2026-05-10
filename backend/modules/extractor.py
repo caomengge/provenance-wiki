@@ -66,7 +66,11 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
 Critical rules:
 1. Preserve ALL non-English text (Chinese, German, Hebrew, French, etc.) EXACTLY as written — do not translate
 2. Extract EVERY person, institution, and artwork mentioned, even if mentioned briefly
-3. If multiple transactions are described, list each as a separate object in the transactions array
+3. Transaction rule: Only emit an entry in `transactions` if the document describes a SPECIFIC exchange event (sale, purchase, auction, donation, bequest, consignment, gift). A valid transaction must have at least TWO of these anchor fields filled: seller, buyer, date, price, auction_house. Do NOT emit a transaction for:
+   - vague mentions of past ownership ("previously owned by X" → record X as an entity with role="previous owner", NOT a transaction)
+   - stray price mentions or valuations not tied to an exchange ("$400 was offered" without buyer/seller/date → put this in notes or description)
+   - shipping or correspondence about a piece that is not itself a sale
+   If multiple distinct transactions are described, list each as a separate object.
 4. tags should include: era/decade, document type, geographic region, transaction type, and any distinctive features
 5. If a field has no applicable information, use null (not empty string)
 6. Return ONLY valid JSON — no markdown, no explanation, no code fences
@@ -118,8 +122,48 @@ Critical rules:
 1. Preserve ALL non-English text EXACTLY as written — do not translate
 2. Extract EVERY person, institution, and artwork mentioned across all pages
 3. The transcription must cover all pages in order, separated by [Page N] markers
-4. Return ONLY valid JSON — no markdown, no explanation, no code fences
-5. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
+4. Transaction rule: Only emit an entry in `transactions` if the document describes a SPECIFIC exchange event (sale, purchase, auction, donation, bequest, consignment, gift). A valid transaction must have at least TWO of these anchor fields filled: seller, buyer, date, price, auction_house. Do NOT emit a transaction for vague mentions of past ownership, stray price mentions not tied to an exchange, or shipping/correspondence that is not itself a sale.
+5. Return ONLY valid JSON — no markdown, no explanation, no code fences
+6. For date_depicted: NEVER guess or infer. Only use a date that is literally written in the document. If you are uncertain at all, use the string: date unknown"""
+
+
+# ── Transaction quality filter ───────────────────────────────────────────────
+
+_TRANSACTION_ANCHORS = ("seller", "buyer", "date", "price", "auction_house")
+
+
+def transaction_score(txn: dict) -> int:
+    """Count how many anchor fields are meaningfully populated."""
+    score = 0
+    for field in _TRANSACTION_ANCHORS:
+        v = txn.get(field)
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        score += 1
+    return score
+
+
+def filter_transactions(transactions: list[dict], min_score: int = None) -> list[dict]:
+    """Drop LLM-extracted transactions below the configured anchor threshold.
+
+    Manual user-created transactions go through the API and are never filtered;
+    only ingestion / re-extraction paths call this.
+    """
+    if min_score is None:
+        from config import TRANSACTION_MIN_SCORE
+        min_score = TRANSACTION_MIN_SCORE
+    if min_score <= 0 or not transactions:
+        return transactions or []
+    kept = []
+    for t in transactions:
+        if transaction_score(t) >= min_score:
+            kept.append(t)
+        else:
+            logger.info("Dropping low-quality transaction (score < %d): %s",
+                        min_score, {k: t.get(k) for k in _TRANSACTION_ANCHORS})
+    return kept
 
 
 # ── Main extraction function ──────────────────────────────────────────────────
