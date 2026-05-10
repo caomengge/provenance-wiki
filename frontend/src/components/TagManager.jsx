@@ -109,58 +109,88 @@ export default function TagManager({ docId, initialTags = [], isGroup = false, g
         </button>
       </div>
 
-      {showAdd && (
-        <div style={{ background: 'var(--cream-bg)', border: '1px solid var(--border)', borderRadius: '3px', padding: '0.75rem', marginTop: '0.25rem' }}>
-          {available.length > 0 && (
-            <div style={{ marginBottom: '0.5rem' }}>
-              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>Existing tags:</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
-                {available.map(t => (
+      {showAdd && (() => {
+        // Existing tags are now offered only as suggestions matching what
+        // the user is typing — never a wall-of-tags. An exact-name match
+        // gets picked over creating a duplicate.
+        const q = newName.trim().toLowerCase()
+        const matches = q
+          ? available.filter(t => t.name.toLowerCase().includes(q)).slice(0, 8)
+          : []
+        const exact = q ? available.find(t => t.name.toLowerCase() === q) : null
+
+        const submit = async () => {
+          if (!newName.trim()) return
+          if (exact) {
+            await addExisting(exact)
+            setNewName('')
+            setShowAdd(false)
+          } else {
+            await createAndAdd()
+          }
+        }
+
+        return (
+          <div style={{ background: 'var(--cream-bg)', border: '1px solid var(--border)', borderRadius: '3px', padding: '0.75rem', marginTop: '0.25rem' }}>
+            <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                value={newName}
+                onChange={e => setNewName(e.target.value)}
+                placeholder="Type a new tag name…"
+                style={{ flex: 1, minWidth: '120px' }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter')  { e.preventDefault(); submit() }
+                  if (e.key === 'Escape') { setShowAdd(false); setNewName('') }
+                }}
+                autoFocus
+              />
+              <div style={{ display: 'flex', gap: '0.25rem' }}>
+                {TAG_COLORS.map(c => (
                   <button
-                    key={t.id}
-                    onClick={() => { addExisting(t); setShowAdd(false) }}
+                    key={c}
+                    onClick={() => setNewColor(c)}
                     style={{
-                      background: t.color + '22',
-                      border: `1px solid ${t.color}66`,
-                      borderRadius: '3px',
-                      padding: '0.15rem 0.5rem',
-                      fontSize: '0.8rem',
-                      cursor: 'pointer',
+                      width: '18px', height: '18px', borderRadius: '50%',
+                      background: c, border: c === newColor ? '2px solid var(--navy)' : '1px solid transparent',
+                      cursor: 'pointer', padding: 0,
                     }}
-                  >
-                    {t.name}
-                  </button>
+                    title={`Color: ${c}`}
+                  />
                 ))}
               </div>
+              <button className="btn btn-primary" onClick={submit} disabled={adding || !newName.trim()}>
+                {adding ? '…' : (exact ? 'Add' : 'Create')}
+              </button>
             </div>
-          )}
-          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              placeholder="New tag name"
-              style={{ flex: 1, minWidth: '120px' }}
-              onKeyDown={e => { if (e.key === 'Enter') createAndAdd() }}
-            />
-            <div style={{ display: 'flex', gap: '0.25rem' }}>
-              {TAG_COLORS.map(c => (
-                <button
-                  key={c}
-                  onClick={() => setNewColor(c)}
-                  style={{
-                    width: '18px', height: '18px', borderRadius: '50%',
-                    background: c, border: c === newColor ? '2px solid var(--navy)' : '1px solid transparent',
-                    cursor: 'pointer', padding: 0,
-                  }}
-                />
-              ))}
-            </div>
-            <button className="btn btn-primary" onClick={createAndAdd} disabled={adding || !newName.trim()}>
-              {adding ? '…' : 'Add'}
-            </button>
+
+            {matches.length > 0 && (
+              <div style={{ marginTop: '0.5rem' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>
+                  Or attach an existing tag:
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                  {matches.map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => { addExisting(t); setShowAdd(false); setNewName('') }}
+                      style={{
+                        background: t.color + '22',
+                        border: `1px solid ${t.color}66`,
+                        borderRadius: '3px',
+                        padding: '0.15rem 0.5rem',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }
