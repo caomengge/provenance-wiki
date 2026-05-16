@@ -183,6 +183,9 @@ Click **▸ Show History** at the bottom of any document or group detail page to
 ### Entities & Merging
 The Entities page lists every unique person, object, and institution across the archive. Edit any row to rename, change type, merge into another entity, or delete it. The **Merge into…** picker is a search-as-you-type field so you can find candidates anywhere in the archive — it isn't limited to entities on the current page.
 
+### Aliases
+An entity can carry alternate names ("Larry Sickman" for "Laurence Sickman"). When you merge one entity into another, the discarded name is kept automatically as an alias of the survivor instead of being lost — useful for understanding how a single person was referred to differently across documents. Open the **Aliases…** panel on any entity row to add or remove alternate names manually. Aliases show as "a.k.a." under the entity name, are matched by the entity search box, and let future ingestion auto-resolve a known alternate name to the existing entity.
+
 ### Transaction Quality
 The extractor prompt asks Claude to only emit a transaction for a specific exchange event (sale, purchase, auction, donation, bequest, consignment, gift). Vague past-ownership mentions become entities with `role="previous owner"` instead.
 
