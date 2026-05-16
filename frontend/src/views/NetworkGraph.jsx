@@ -20,7 +20,10 @@ const NODE_RADIUS = {
   unknown:     8,
 }
 
-const ALL_TYPES = ['document', 'person', 'object', 'institution', 'unknown']
+// Entity types the network can show. People are the default view; the rest
+// are opt-in. Documents are not nodes — the graph is entity relationships only.
+const ALL_TYPES = ['person', 'object', 'institution', 'unknown']
+const DEFAULT_TYPES = ['person']
 
 export default function NetworkGraph() {
   const svgRef      = useRef(null)
@@ -34,7 +37,7 @@ export default function NetworkGraph() {
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTypes, setActiveTypes] = useState(new Set(ALL_TYPES))
+  const [activeTypes, setActiveTypes] = useState(new Set(DEFAULT_TYPES))
 
   // Entity document list state
   const [docsExpanded, setDocsExpanded] = useState(false)
@@ -44,12 +47,13 @@ export default function NetworkGraph() {
   // Document preview panel
   const [previewDocId, setPreviewDocId] = useState(null)
 
+  // Fetches the graph for the currently active entity types. Toggling a type
+  // re-runs this (the backend only returns the requested types, keeping the
+  // payload small) — so type filtering is a refetch, not a client-side hide.
   const load = useCallback(async () => {
     setLoading(true)
-    setSearchQuery('')
-    setActiveTypes(new Set(ALL_TYPES))
     try {
-      const params = {}
+      const params = { types: [...activeTypes].join(',') }
       const docId = searchParams.get('doc_id')
       if (docId) params.doc_id = docId
       const res = await api.getNetwork(params)
@@ -59,7 +63,7 @@ export default function NetworkGraph() {
     } finally {
       setLoading(false)
     }
-  }, [searchParams])
+  }, [searchParams, activeTypes])
 
   useEffect(() => { load() }, [load])
 
@@ -69,10 +73,10 @@ export default function NetworkGraph() {
     graphApiRef.current = renderGraph(data, svgRef.current, setSelected)
   }, [data])
 
-  // Apply highlight / filter whenever search or activeTypes changes
+  // Re-apply the search highlight after a render or when the query changes
   useEffect(() => {
-    graphApiRef.current?.applyVisualState(searchQuery, activeTypes)
-  }, [searchQuery, activeTypes])
+    graphApiRef.current?.applyVisualState(searchQuery)
+  }, [searchQuery, data])
 
   // Reset document list whenever a different node is selected
   useEffect(() => {
@@ -244,30 +248,8 @@ export default function NetworkGraph() {
               {selected.label}
             </div>
 
-            {/* Document node */}
-            {selected.type === 'document' && (
-              <>
-                {selected.date && <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>📅 {selected.date}</div>}
-                {selected.page_count && <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>⊞ {selected.page_count} pages</div>}
-                {selected.is_key_evidence && <div style={{ fontSize: '0.82rem', color: 'var(--rust)', marginTop: '0.25rem' }}>★ Key Evidence</div>}
-                <button
-                  className="btn btn-primary"
-                  style={{ marginTop: '0.75rem', width: '100%', fontSize: '0.85rem' }}
-                  onClick={() => {
-                    if (selected.id.startsWith('grp_')) {
-                      navigate(`/groups/${selected.db_id}`)
-                    } else {
-                      setPreviewDocId(selected.db_id)
-                    }
-                  }}
-                >
-                  Open Document →
-                </button>
-              </>
-            )}
-
             {/* Entity node — document list toggle */}
-            {selected.type !== 'document' && selected.doc_count !== undefined && (
+            {selected.doc_count !== undefined && (
               <div>
                 <button
                   onClick={toggleDocs}
@@ -399,24 +381,13 @@ function renderGraph(data, svgEl, setSelected) {
   node.each(function(d) {
     const el   = d3.select(this)
     const r    = NODE_RADIUS[d.type] || 8
-    const fill = (d.type === 'document' && d.is_key_evidence)
-      ? '#8b3a2e'
-      : (NODE_COLORS[d.type] || '#888')
+    const fill = NODE_COLORS[d.type] || '#888'
 
-    // 1. Background shape (coloured circle or square)
-    if (d.type === 'document') {
-      el.append('rect')
-        .attr('x', -r).attr('y', -r)
-        .attr('width', r * 2).attr('height', r * 2)
-        .attr('rx', 2)
-        .attr('fill', fill)
-        .attr('stroke', 'white').attr('stroke-width', 1.5)
-    } else {
-      el.append('circle')
-        .attr('r', r)
-        .attr('fill', fill)
-        .attr('stroke', 'white').attr('stroke-width', 1.5)
-    }
+    // 1. Background circle
+    el.append('circle')
+      .attr('r', r)
+      .attr('fill', fill)
+      .attr('stroke', 'white').attr('stroke-width', 1.5)
 
     // 2. Pictographic icon centered at (0,0)
     _drawNodeIcon(el, d.type, fill)
@@ -437,59 +408,53 @@ function renderGraph(data, svgEl, setSelected) {
   svg.on('click', () => setSelected(null))
 
   // ── Force simulation ──────────────────────────────────────────────────────
+  // The layout is warmed up off-screen: ticking without touching the DOM
+  // avoids hundreds of full-graph SVG updates that froze the page. The DOM is
+  // positioned once after warm-up, then again only while a node is dragged.
+  function draw() {
+    link
+      .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+      .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
+    node.attr('transform', d => `translate(${d.x},${d.y})`)
+  }
+
   const simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(validEdges).id(d => d.id).distance(d => 60 + 10 / (d.weight || 1)))
     .force('charge', d3.forceManyBody().strength(-120))
     .force('center', d3.forceCenter(width / 2, height / 2))
     .force('collision', d3.forceCollide().radius(20))
-    .on('tick', () => {
-      link
-        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
-        .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
-      node.attr('transform', d => `translate(${d.x},${d.y})`)
-    })
+    .stop()
+
+  for (let i = 0; i < 250; i++) simulation.tick()
+  draw()
+
+  // Keep drag interactive: the ticker only runs while the simulation is hot
+  // (drag handlers call alphaTarget(0.3).restart()).
+  simulation.on('tick', draw)
 
   // ── Visual-state API ──────────────────────────────────────────────────────
-  // Called imperatively from React whenever search query or active types change.
+  // Called imperatively from React whenever the search query changes.
   // After the simulation runs, d.source / d.target in link data are node objects.
 
-  function _shape(gEl) {
-    // Returns the circle or rect child of a node <g>
-    const c = gEl.select('circle')
-    return c.empty() ? gEl.select('rect') : c
-  }
-
-  function applyVisualState(query, types) {
+  function applyVisualState(query) {
     const q        = (query || '').trim().toLowerCase()
     const hasQuery = q.length > 0
 
-    // 1. Type filter — hide nodes + edges whose endpoints are hidden
-    node.style('display', d => types.has(d.type) ? null : 'none')
-    link.style('display', d => {
-      const src = typeof d.source === 'object' ? d.source : nodeById[d.source]
-      const tgt = typeof d.target === 'object' ? d.target : nodeById[d.target]
-      if (!src || !tgt) return 'none'
-      return (types.has(src.type) && types.has(tgt.type)) ? null : 'none'
-    })
-
-    // 2. Search highlight
     if (!hasQuery) {
       // Reset to default appearance
       node.style('opacity', 1)
-      node.each(function() { _shape(d3.select(this)).attr('stroke', 'white').attr('stroke-width', 1.5) })
+      node.each(function() {
+        d3.select(this).select('circle').attr('stroke', 'white').attr('stroke-width', 1.5)
+      })
       link.attr('stroke-opacity', 0.6)
       return
     }
 
     // Dim non-matching nodes; illuminate matches with a gold ring
-    node.style('opacity', d => {
-      if (!types.has(d.type)) return 0
-      return d.label?.toLowerCase().includes(q) ? 1 : 0.1
-    })
+    node.style('opacity', d => d.label?.toLowerCase().includes(q) ? 1 : 0.1)
     node.each(function(d) {
-      if (!types.has(d.type)) return
       const matches = d.label?.toLowerCase().includes(q)
-      _shape(d3.select(this))
+      d3.select(this).select('circle')
         .attr('stroke', matches ? '#c9a84c' : 'white')
         .attr('stroke-width', matches ? 3.5 : 1.5)
     })
@@ -498,7 +463,7 @@ function renderGraph(data, svgEl, setSelected) {
     link.attr('stroke-opacity', d => {
       const src = typeof d.source === 'object' ? d.source : nodeById[d.source]
       const tgt = typeof d.target === 'object' ? d.target : nodeById[d.target]
-      if (!src || !tgt || !types.has(src.type) || !types.has(tgt.type)) return 0
+      if (!src || !tgt) return 0
       const srcM = src.label?.toLowerCase().includes(q)
       const tgtM = tgt.label?.toLowerCase().includes(q)
       return (srcM || tgtM) ? 0.75 : 0.08
