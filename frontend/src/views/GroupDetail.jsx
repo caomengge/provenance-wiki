@@ -188,7 +188,7 @@ export default function GroupDetail() {
     { label: 'Source',     field: 'source_archive',  value: group.source_archive },
   ]
 
-  const ENTITY_TYPES = ['person', 'object', 'institution', 'unknown']
+  const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
   return (
     <div>

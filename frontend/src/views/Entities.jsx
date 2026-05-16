@@ -7,10 +7,11 @@ const TYPE_COLORS = {
   person:      { bg: '#2563eb22', border: '#2563eb66', text: '#1d4ed8' },
   object:      { bg: '#d9770622', border: '#d9770666', text: '#b45309' },
   institution: { bg: '#16a34a22', border: '#16a34a66', text: '#15803d' },
+  place:       { bg: '#0891b222', border: '#0891b266', text: '#0e7490' },
   unknown:     { bg: '#6b728022', border: '#6b728066', text: '#4b5563' },
 }
 
-const ENTITY_TYPES = ['person', 'object', 'institution', 'unknown']
+const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
 function TypeBadge({ type }) {
   const c = TYPE_COLORS[type] || TYPE_COLORS.unknown

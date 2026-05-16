@@ -9,6 +9,7 @@ const NODE_COLORS = {
   person:      '#2563eb',
   object:      '#d97706',
   institution: '#16a34a',
+  place:       '#0891b2',
   unknown:     '#6b7280',
 }
 
@@ -17,10 +18,11 @@ const NODE_RADIUS = {
   person:      10,
   object:      9,
   institution: 11,
+  place:       9,
   unknown:     8,
 }
 
-const ALL_TYPES = ['document', 'person', 'object', 'institution', 'unknown']
+const ALL_TYPES = ['document', 'person', 'object', 'institution', 'place', 'unknown']
 
 export default function NetworkGraph() {
   const svgRef      = useRef(null)
