@@ -35,7 +35,7 @@ def list_entities():
     type_filter = request.args.get("type")           # person | object | institution
     q         = request.args.get("q", "").strip()    # name search
 
-    allowed_types = {"person", "object", "institution", "unknown"}
+    allowed_types = {"person", "object", "institution", "place", "unknown"}
 
     with get_db() as conn:
         wheres, params = [], []
@@ -306,7 +306,7 @@ def entity_documents(entity_id):
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-ALLOWED_TYPES = {"person", "object", "institution", "unknown"}
+ALLOWED_TYPES = {"person", "object", "institution", "place", "unknown"}
 
 @bp.route("/api/entities/<int:entity_id>", methods=["PATCH"])
 def update_entity(entity_id):

@@ -6,7 +6,7 @@ import EntityTag from './EntityTag'
 import InlineEdit from './InlineEdit'
 import EntityNameAutocomplete from './EntityNameAutocomplete'
 
-const ENTITY_TYPES = ['person', 'object', 'institution', 'unknown']
+const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
 export default function DocPreviewPanel({ docId, onClose }) {
   const [doc, setDoc]           = useState(null)

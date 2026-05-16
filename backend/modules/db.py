@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS entities (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT    NOT NULL,
     normalized_name TEXT    NOT NULL,
-    type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','unknown')),
+    type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','place','unknown')),
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(normalized_name, type)
 );
@@ -351,6 +351,13 @@ def init_db():
     """Create all tables, indexes, FTS table, and triggers if they don't exist."""
     db_path = _get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Rebuild the entities table if its CHECK constraint predates the 'place'
+    # entity type. Runs first, on its own connection, because it must disable
+    # foreign keys — a PRAGMA that is silently ignored inside an open
+    # transaction. No-op on a fresh database (no entities table yet).
+    _migrate_entity_type_check(db_path)
+
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
         # Migrations: add columns that may not exist in older databases
@@ -390,6 +397,48 @@ def _migrate(conn: sqlite3.Connection, sql: str):
         conn.execute(sql)
     except sqlite3.OperationalError:
         pass  # Column already exists
+
+
+def _migrate_entity_type_check(db_path):
+    """Rebuild the entities table so its type CHECK constraint allows 'place'.
+
+    SQLite cannot ALTER a CHECK constraint, so the table must be recreated.
+    No-op if the constraint already permits 'place' or the table doesn't
+    exist yet (fresh database).
+
+    Uses a dedicated connection: `PRAGMA foreign_keys=OFF` is silently
+    ignored inside an open transaction, and it MUST take effect here —
+    otherwise `DROP TABLE entities` performs an implicit cascade DELETE
+    that wipes document_entities / group_entities / entity_aliases.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='entities'"
+        ).fetchone()
+        if not row or "'place'" in row[0]:
+            return
+
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript("""
+            BEGIN;
+            CREATE TABLE entities_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT    NOT NULL,
+                normalized_name TEXT    NOT NULL,
+                type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','place','unknown')),
+                created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(normalized_name, type)
+            );
+            INSERT INTO entities_new (id, name, normalized_name, type, created_at)
+                SELECT id, name, normalized_name, type, created_at FROM entities;
+            DROP TABLE entities;
+            ALTER TABLE entities_new RENAME TO entities;
+            CREATE INDEX IF NOT EXISTS idx_entities_normalized ON entities(normalized_name, type);
+            COMMIT;
+        """)
+    finally:
+        conn.close()
 
 
 def _backfill_medium_category(conn: sqlite3.Connection):
@@ -435,7 +484,7 @@ def upsert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> int:
         return None
     norm = normalize_entity_name(name)
     entity_type = entity_type.lower()
-    if entity_type not in ("person", "object", "institution"):
+    if entity_type not in ("person", "object", "institution", "place"):
         entity_type = "unknown"
 
     cur = conn.execute(

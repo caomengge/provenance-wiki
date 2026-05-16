@@ -181,7 +181,10 @@ The list auto-refreshes while a run is in progress. The Skipped count (files alr
 Click **▸ Show History** at the bottom of any document or group detail page to see every edit recorded against that record: per-field updates with old and new values, entity link/unlink, document links, deletions, group membership changes, and the ingestion run that originally produced the record. Long text fields (transcription, description, annotation) are truncated at 1000 characters in the history to keep the table compact.
 
 ### Entities & Merging
-The Entities page lists every unique person, object, and institution across the archive. Edit any row to rename, change type, merge into another entity, or delete it. The **Merge into…** picker is a search-as-you-type field so you can find candidates anywhere in the archive — it isn't limited to entities on the current page.
+The Entities page lists every unique person, object, institution, and place across the archive. Edit any row to rename, change type, merge into another entity, or delete it. The **Merge into…** picker is a search-as-you-type field so you can find candidates anywhere in the archive — it isn't limited to entities on the current page.
+
+### Places
+Geographical places (cities, provinces, states, countries) are extracted as entities with type `place`, so a city can be tracked across every document that mentions it. Each place entity names exactly one place — a compound location like "Kansas City, Missouri" becomes two entities, "Kansas City" and "Missouri". Documents ingested before this feature can be backfilled without re-running the Claude API — see [Backfilling places](#backfilling-places) below.
 
 ### Aliases
 An entity can carry alternate names ("Larry Sickman" for "Laurence Sickman"). When you merge one entity into another, the discarded name is kept automatically as an alias of the survivor instead of being lost — useful for understanding how a single person was referred to differently across documents. Open the **Aliases…** panel on any entity row to add or remove alternate names manually. Aliases show as "a.k.a." under the entity name, are matched by the entity search box, and let future ingestion auto-resolve a known alternate name to the existing entity.
@@ -211,6 +214,17 @@ cp data/provenance.db data/provenance.db.bak
 ```
 
 Deletions are recorded in `audit_events` so they can be inspected (or reversed via the SQL backup) later.
+
+### Backfilling places
+The `place` entity type was added after some archives were already ingested. To create place entities for older documents **without** spending Claude API credits, run the backfill script. It derives places only from data already in the database: it splits each document's free-text `location` field into atomic places, then matches recurring places in transcriptions, descriptions, and tags.
+
+```bash
+cp data/provenance.db data/provenance.db.bak
+.venv/bin/python -m backend.scripts.backfill_places          # dry-run
+.venv/bin/python -m backend.scripts.backfill_places --apply  # write
+```
+
+The script is a dry run by default and idempotent (safe to re-run). It also reports existing `unknown`/`institution` entities that look like places, for you to retype in the Entities page. Backfilling free text is best-effort and cannot match a fresh Claude extraction — new ingests pick up places automatically.
 
 ---
 
