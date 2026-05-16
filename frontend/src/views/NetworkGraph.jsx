@@ -9,6 +9,7 @@ const NODE_COLORS = {
   person:      '#2563eb',
   object:      '#d97706',
   institution: '#16a34a',
+  place:       '#0891b2',
   unknown:     '#6b7280',
 }
 
@@ -17,12 +18,13 @@ const NODE_RADIUS = {
   person:      10,
   object:      9,
   institution: 11,
+  place:       9,
   unknown:     8,
 }
 
 // Entity types the network can show. People are the default view; the rest
 // are opt-in. Documents are not nodes — the graph is entity relationships only.
-const ALL_TYPES = ['person', 'object', 'institution', 'unknown']
+const ALL_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 const DEFAULT_TYPES = ['person']
 
 export default function NetworkGraph() {

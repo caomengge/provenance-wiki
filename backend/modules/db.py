@@ -57,9 +57,20 @@ CREATE TABLE IF NOT EXISTS entities (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     name            TEXT    NOT NULL,
     normalized_name TEXT    NOT NULL,
-    type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','unknown')),
+    type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','place','unknown')),
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(normalized_name, type)
+);
+
+-- ── Entity aliases (alternate names / "also known as") ──────────────────────
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id       INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    name            TEXT    NOT NULL,
+    normalized_name TEXT    NOT NULL,
+    source          TEXT    NOT NULL DEFAULT 'merge',   -- 'merge' | 'manual'
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(entity_id, normalized_name)
 );
 
 -- ── Document ↔ Entity pivot ────────────────────────────────────────────────
@@ -120,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_documents_sha256          ON documents(sha256);
 CREATE INDEX IF NOT EXISTS idx_documents_date_depicted   ON documents(date_depicted);
 CREATE INDEX IF NOT EXISTS idx_documents_key_evidence    ON documents(is_key_evidence);
 CREATE INDEX IF NOT EXISTS idx_entities_normalized       ON entities(normalized_name, type);
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity     ON entity_aliases(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_norm       ON entity_aliases(normalized_name);
 CREATE INDEX IF NOT EXISTS idx_doc_entities_doc          ON document_entities(document_id);
 CREATE INDEX IF NOT EXISTS idx_doc_entities_entity       ON document_entities(entity_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_doc          ON transactions(document_id);
@@ -338,6 +351,13 @@ def init_db():
     """Create all tables, indexes, FTS table, and triggers if they don't exist."""
     db_path = _get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Rebuild the entities table if its CHECK constraint predates the 'place'
+    # entity type. Runs first, on its own connection, because it must disable
+    # foreign keys — a PRAGMA that is silently ignored inside an open
+    # transaction. No-op on a fresh database (no entities table yet).
+    _migrate_entity_type_check(db_path)
+
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
         # Migrations: add columns that may not exist in older databases
@@ -377,6 +397,48 @@ def _migrate(conn: sqlite3.Connection, sql: str):
         conn.execute(sql)
     except sqlite3.OperationalError:
         pass  # Column already exists
+
+
+def _migrate_entity_type_check(db_path):
+    """Rebuild the entities table so its type CHECK constraint allows 'place'.
+
+    SQLite cannot ALTER a CHECK constraint, so the table must be recreated.
+    No-op if the constraint already permits 'place' or the table doesn't
+    exist yet (fresh database).
+
+    Uses a dedicated connection: `PRAGMA foreign_keys=OFF` is silently
+    ignored inside an open transaction, and it MUST take effect here —
+    otherwise `DROP TABLE entities` performs an implicit cascade DELETE
+    that wipes document_entities / group_entities / entity_aliases.
+    """
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='entities'"
+        ).fetchone()
+        if not row or "'place'" in row[0]:
+            return
+
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.executescript("""
+            BEGIN;
+            CREATE TABLE entities_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                name            TEXT    NOT NULL,
+                normalized_name TEXT    NOT NULL,
+                type            TEXT    NOT NULL CHECK(type IN ('person','object','institution','place','unknown')),
+                created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(normalized_name, type)
+            );
+            INSERT INTO entities_new (id, name, normalized_name, type, created_at)
+                SELECT id, name, normalized_name, type, created_at FROM entities;
+            DROP TABLE entities;
+            ALTER TABLE entities_new RENAME TO entities;
+            CREATE INDEX IF NOT EXISTS idx_entities_normalized ON entities(normalized_name, type);
+            COMMIT;
+        """)
+    finally:
+        conn.close()
 
 
 def _backfill_medium_category(conn: sqlite3.Connection):
@@ -422,7 +484,7 @@ def upsert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> int:
         return None
     norm = normalize_entity_name(name)
     entity_type = entity_type.lower()
-    if entity_type not in ("person", "object", "institution"):
+    if entity_type not in ("person", "object", "institution", "place"):
         entity_type = "unknown"
 
     cur = conn.execute(
@@ -433,11 +495,50 @@ def upsert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> int:
     if row:
         return row["id"]
 
+    # No entity with that name — check whether the name is a known alias of an
+    # existing entity (recorded by a prior merge or added manually). This makes
+    # ingestion resolve alternate names ("Larry Sickman" → "Laurence Sickman").
+    cur = conn.execute(
+        """SELECT a.entity_id FROM entity_aliases a
+           JOIN entities e ON e.id = a.entity_id
+           WHERE a.normalized_name=? AND e.type=?""",
+        (norm, entity_type)
+    )
+    row = cur.fetchone()
+    if row:
+        return row["entity_id"]
+
     cur = conn.execute(
         "INSERT INTO entities (name, normalized_name, type) VALUES (?,?,?)",
         (name.strip(), norm, entity_type)
     )
     return cur.lastrowid
+
+
+def add_entity_alias(conn: sqlite3.Connection, entity_id: int, name: str,
+                     source: str = "merge") -> bool:
+    """Record an alternate name for an entity.
+
+    Returns True if a new alias row was created, False if it was skipped
+    (blank name, or the name already matches the entity itself or an
+    existing alias). Safe to call repeatedly.
+    """
+    if not name or not name.strip():
+        return False
+    norm = normalize_entity_name(name)
+
+    ent = conn.execute(
+        "SELECT normalized_name FROM entities WHERE id=?", (entity_id,)
+    ).fetchone()
+    if not ent or ent["normalized_name"] == norm:
+        return False
+
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO entity_aliases
+           (entity_id, name, normalized_name, source) VALUES (?,?,?,?)""",
+        (entity_id, name.strip(), norm, source)
+    )
+    return cur.rowcount > 0
 
 
 def get_or_create_tag(conn: sqlite3.Connection, name: str, color: str = "#c9a84c") -> int:

@@ -226,6 +226,7 @@ label {
 .badge-person      { background: #dbeafe; color: #1e3a5f; }
 .badge-object      { background: #fef3c7; color: #78350f; }
 .badge-institution { background: #d1fae5; color: #065f46; }
+.badge-place       { background: #cffafe; color: #155e75; }
 .badge-unknown     { background: #f3f4f6; color: #4b5563; }
 
 /* ── Key evidence indicator ──────────────────────────────────────────────── */

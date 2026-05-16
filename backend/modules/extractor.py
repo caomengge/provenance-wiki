@@ -40,9 +40,9 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
   "language": "primary language(s) of the document text (e.g., 'English', 'German', 'Chinese', 'French, German')",
   "entities": [
     {
-      "name": "full name of person, object, or institution EXACTLY as written in the document",
-      "type": "person OR object OR institution",
-      "role": "role in this document (e.g., 'seller', 'buyer', 'previous owner', 'auction house', 'artist', 'artwork', 'dealer', 'museum', 'consignor')",
+      "name": "full name of a person, object, institution, or geographical place EXACTLY as written in the document",
+      "type": "person OR object OR institution OR place",
+      "role": "role in this document (e.g., 'seller', 'buyer', 'previous owner', 'auction house', 'artist', 'artwork', 'dealer', 'museum', 'consignor'; for a place: 'place of sale', 'origin', 'current location', 'mentioned')",
       "context": "one sentence explaining how this entity relates to the document"
     }
   ],
@@ -65,7 +65,7 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
 
 Critical rules:
 1. Preserve ALL non-English text (Chinese, German, Hebrew, French, etc.) EXACTLY as written — do not translate
-2. Extract EVERY person, institution, and artwork mentioned, even if mentioned briefly
+2. Extract EVERY person, institution, and artwork mentioned, even if mentioned briefly. Also extract geographical places (cities, provinces, states, countries) as entities with type "place". Each place entity must name exactly ONE place — never combine multiple places into one entity and never use a compound "City, State" or "City, Country" form. For example, "Kansas City, Missouri" must be emitted as two separate place entities, "Kansas City" and "Missouri"
 3. Transaction rule: Only emit an entry in `transactions` if the document describes a SPECIFIC exchange event (sale, purchase, auction, donation, bequest, consignment, gift). A valid transaction must have at least TWO of these anchor fields filled: seller, buyer, date, price, auction_house. Do NOT emit a transaction for:
    - vague mentions of past ownership ("previously owned by X" → record X as an entity with role="previous owner", NOT a transaction)
    - stray price mentions or valuations not tied to an exchange ("$400 was offered" without buyer/seller/date → put this in notes or description)
@@ -96,9 +96,9 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
   "transcription": "faithful word-for-word transcription of ALL visible text across all pages in sequence, preserving original spelling, punctuation, and line breaks. Mark page breaks with [Page N]. Non-English text must be reproduced exactly — do not translate. Use [illegible] for unreadable words.",
   "entities": [
     {{
-      "name": "full name of person, object, or institution EXACTLY as written",
-      "type": "person OR object OR institution",
-      "role": "role in this document",
+      "name": "full name of a person, object, institution, or geographical place EXACTLY as written",
+      "type": "person OR object OR institution OR place",
+      "role": "role in this document (for a place: 'place of sale', 'origin', 'current location', 'mentioned')",
       "context": "one sentence explaining how this entity relates to the document"
     }}
   ],
@@ -120,7 +120,7 @@ Return ONLY a valid JSON object with this exact structure (no other text before 
 
 Critical rules:
 1. Preserve ALL non-English text EXACTLY as written — do not translate
-2. Extract EVERY person, institution, and artwork mentioned across all pages
+2. Extract EVERY person, institution, and artwork mentioned across all pages. Also extract geographical places (cities, provinces, states, countries) as entities with type "place". Each place entity must name exactly ONE place — never combine multiple places into one entity and never use a compound "City, State" or "City, Country" form. For example, "Kansas City, Missouri" must be emitted as two separate place entities, "Kansas City" and "Missouri"
 3. The transcription must cover all pages in order, separated by [Page N] markers
 4. Transaction rule: Only emit an entry in `transactions` if the document describes a SPECIFIC exchange event (sale, purchase, auction, donation, bequest, consignment, gift). A valid transaction must have at least TWO of these anchor fields filled: seller, buyer, date, price, auction_house. Do NOT emit a transaction for vague mentions of past ownership, stray price mentions not tied to an exchange, or shipping/correspondence that is not itself a sale.
 5. Return ONLY valid JSON — no markdown, no explanation, no code fences

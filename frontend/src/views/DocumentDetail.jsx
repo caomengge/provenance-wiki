@@ -212,7 +212,7 @@ export default function DocumentDetail() {
 
   // ── Entity type styles ──────────────────────────────────────────────────────
 
-  const ENTITY_TYPES = ['person', 'object', 'institution', 'unknown']
+  const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
   return (
     <div>

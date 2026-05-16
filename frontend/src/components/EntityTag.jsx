@@ -9,6 +9,7 @@ export default function EntityTag({ entity, onClick, size = 'sm' }) {
     person: 'badge-person',
     object: 'badge-object',
     institution: 'badge-institution',
+    place: 'badge-place',
   }[entity?.type] || 'badge-unknown'
 
   const handleClick = (e) => {

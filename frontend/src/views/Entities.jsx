@@ -7,10 +7,11 @@ const TYPE_COLORS = {
   person:      { bg: '#2563eb22', border: '#2563eb66', text: '#1d4ed8' },
   object:      { bg: '#d9770622', border: '#d9770666', text: '#b45309' },
   institution: { bg: '#16a34a22', border: '#16a34a66', text: '#15803d' },
+  place:       { bg: '#0891b222', border: '#0891b266', text: '#0e7490' },
   unknown:     { bg: '#6b728022', border: '#6b728066', text: '#4b5563' },
 }
 
-const ENTITY_TYPES = ['person', 'object', 'institution', 'unknown']
+const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
 function TypeBadge({ type }) {
   const c = TYPE_COLORS[type] || TYPE_COLORS.unknown
@@ -44,6 +45,48 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState('')
+  const [aliasesOpen, setAliasesOpen] = useState(false)
+  const [aliases, setAliases] = useState([])
+  const [aliasInput, setAliasInput] = useState('')
+  const [aliasBusy, setAliasBusy] = useState(false)
+
+  const loadAliases = useCallback(async () => {
+    try {
+      const res = await api.getEntity(entity.id)
+      setAliases(res.aliases || [])
+    } catch (err) {
+      setError(err.message)
+    }
+  }, [entity.id])
+
+  const handleAddAlias = async () => {
+    const name = aliasInput.trim()
+    if (!name) return
+    setAliasBusy(true)
+    setError('')
+    try {
+      await api.addEntityAlias(entity.id, name)
+      setAliasInput('')
+      await loadAliases()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setAliasBusy(false)
+    }
+  }
+
+  const handleRemoveAlias = async (aliasId) => {
+    setAliasBusy(true)
+    setError('')
+    try {
+      await api.removeEntityAlias(entity.id, aliasId)
+      await loadAliases()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setAliasBusy(false)
+    }
+  }
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Name is required'); return }
@@ -120,6 +163,19 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
             style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem', color: 'var(--text-muted)' }}
           >
             Merge into…
+          </button>
+          <button
+            className="btn btn-ghost"
+            onClick={() => {
+              setAliasesOpen(v => {
+                if (!v) loadAliases()
+                return !v
+              })
+              setConfirmDelete(false)
+            }}
+            style={{ fontSize: '0.82rem', padding: '0.25rem 0.6rem', color: 'var(--text-muted)' }}
+          >
+            Aliases…
           </button>
           {!confirmDelete ? (
             <button
@@ -207,6 +263,67 @@ function EditRow({ entity, onSave, onCancel, onMerge, onDelete }) {
                 style={{ fontSize: '0.78rem', padding: '0.2rem 0.6rem' }}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </td>
+      </tr>
+    )}
+    {aliasesOpen && (
+      <tr style={{ background: 'var(--cream-bg)' }}>
+        <td colSpan={4} style={{ padding: '0 0.75rem 0.8rem', borderTop: 'none' }}>
+          <div style={{
+            whiteSpace: 'normal',
+            background: 'var(--cream-card, #faf7f2)',
+            border: '1px solid var(--border)',
+            borderRadius: '4px',
+            padding: '0.6rem 0.75rem',
+          }}>
+            <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+              Alternate names for <strong>{entity.name}</strong>
+            </label>
+            {aliases.length === 0 && (
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>
+                No aliases yet.
+              </div>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.5rem' }}>
+              {aliases.map(a => (
+                <span key={a.id} style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '0.35rem',
+                  background: 'white', border: '1px solid var(--border)',
+                  borderRadius: '3px', padding: '0.15rem 0.45rem', fontSize: '0.8rem',
+                }}>
+                  {a.name}
+                  <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                    ({a.source})
+                  </span>
+                  <button
+                    onClick={() => handleRemoveAlias(a.id)}
+                    disabled={aliasBusy}
+                    title="Remove alias"
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: '#b91c1c', fontSize: '0.85rem', lineHeight: 1 }}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                value={aliasInput}
+                onChange={e => setAliasInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAddAlias() }}
+                placeholder="Add an alternate name…"
+                style={{ flex: 1, fontFamily: 'var(--font-serif)', fontSize: '0.85rem' }}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={handleAddAlias}
+                disabled={aliasBusy || !aliasInput.trim()}
+                style={{ fontSize: '0.82rem', padding: '0.3rem 0.8rem' }}
+              >
+                {aliasBusy ? '…' : 'Add'}
               </button>
             </div>
           </div>
@@ -381,6 +498,12 @@ export default function Entities() {
                       >
                         {entity.name}
                       </button>
+                      {entity.aliases && (
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem' }}
+                             title="Alternate names / aliases">
+                          a.k.a. {entity.aliases}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '0.55rem 0.75rem' }}>
                       <TypeBadge type={entity.type} />

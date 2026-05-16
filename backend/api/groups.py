@@ -470,7 +470,7 @@ def add_group_entity(group_id):
     if not name:
         return jsonify({"error": "name is required"}), 400
 
-    allowed_types = {"person", "object", "institution", "unknown"}
+    allowed_types = {"person", "object", "institution", "place", "unknown"}
     if type_ not in allowed_types:
         type_ = "unknown"
 
