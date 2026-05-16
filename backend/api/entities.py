@@ -8,6 +8,8 @@ Routes:
   DELETE /api/entities/:id          – delete entity and its document links
   POST   /api/entities/merge         – merge two entities into one
   GET    /api/entities/:id/documents – documents mentioning this entity
+  POST   /api/entities/:id/aliases   – add an alternate name
+  DELETE /api/entities/:id/aliases/:alias_id – remove an alternate name
 """
 
 from flask import Blueprint, abort, jsonify, request
@@ -42,8 +44,15 @@ def list_entities():
             wheres.append("e.type = ?")
             params.append(type_filter)
         if q:
-            wheres.append("e.normalized_name LIKE ?")
-            params.append(f"%{q.lower()}%")
+            # Match the entity's own name OR any of its recorded aliases, so
+            # searching an alternate name ("Larry") finds the merged entity.
+            wheres.append(
+                """(e.normalized_name LIKE ?
+                    OR EXISTS (SELECT 1 FROM entity_aliases a
+                               WHERE a.entity_id = e.id
+                                 AND a.normalized_name LIKE ?))"""
+            )
+            params.extend([f"%{q.lower()}%", f"%{q.lower()}%"])
 
         where_sql = ("WHERE " + " AND ".join(wheres)) if wheres else ""
 
@@ -57,6 +66,8 @@ def list_entities():
         # attached to both a child page and the group itself.
         rows = conn.execute(
             f"""SELECT e.id, e.name, e.type, e.normalized_name, e.created_at,
+                       (SELECT GROUP_CONCAT(a.name, ', ')
+                        FROM entity_aliases a WHERE a.entity_id = e.id) AS aliases,
                        (SELECT COUNT(*) FROM (
                           SELECT d.id AS rid, 'd' AS kind
                           FROM document_entities de
@@ -193,9 +204,16 @@ def get_entity(entity_id):
             (entity_id, entity_id, entity_id, entity_id)
         ).fetchall()
 
+        aliases = conn.execute(
+            """SELECT id, name, source, created_at FROM entity_aliases
+               WHERE entity_id = ? ORDER BY name""",
+            (entity_id,)
+        ).fetchall()
+
         entity["documents"]    = all_docs
         entity["doc_count"]    = len(all_docs)
         entity["co_entities"]  = rows_to_list(co_entities)
+        entity["aliases"]      = rows_to_list(aliases)
 
     return jsonify(entity)
 
@@ -338,6 +356,7 @@ def delete_entity(entity_id):
 @bp.route("/api/entities/merge", methods=["POST"])
 def merge_entities():
     DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, get_db, rows_to_list, row_to_dict, _ = _get_deps()
+    from modules.db import add_entity_alias, record_audit
 
     data       = request.get_json(silent=True) or {}
     keep_id    = data.get("keep_id")
@@ -351,8 +370,27 @@ def merge_entities():
     with get_db() as conn:
         if not conn.execute("SELECT 1 FROM entities WHERE id=?", (keep_id,)).fetchone():
             return jsonify({"error": f"Entity {keep_id} not found"}), 404
-        if not conn.execute("SELECT 1 FROM entities WHERE id=?", (discard_id,)).fetchone():
+        discard = conn.execute(
+            "SELECT * FROM entities WHERE id=?", (discard_id,)
+        ).fetchone()
+        if not discard:
             return jsonify({"error": f"Entity {discard_id} not found"}), 404
+
+        # Preserve the discarded entity's name as an alias of the survivor so
+        # the alternate name is not lost, then carry over any aliases the
+        # discarded entity itself had collected. UPDATE OR IGNORE skips rows
+        # that would collide on the (entity_id, normalized_name) UNIQUE
+        # constraint; the DELETE clears those leftovers before the CASCADE.
+        if add_entity_alias(conn, keep_id, discard["name"], source="merge"):
+            record_audit(conn, entity_type="entity", entity_id=keep_id,
+                         action="add_alias", new=discard["name"])
+        conn.execute(
+            "UPDATE OR IGNORE entity_aliases SET entity_id=? WHERE entity_id=?",
+            (keep_id, discard_id)
+        )
+        conn.execute(
+            "DELETE FROM entity_aliases WHERE entity_id=?", (discard_id,)
+        )
 
         # Re-point all document_entities rows to the surviving entity.
         # UPDATE OR IGNORE skips rows that would violate the
@@ -381,3 +419,46 @@ def merge_entities():
         conn.execute("DELETE FROM entities WHERE id=?", (discard_id,))
 
     return jsonify({"ok": True, "merged_into": keep_id})
+
+
+# ── Aliases ───────────────────────────────────────────────────────────────────
+
+@bp.route("/api/entities/<int:entity_id>/aliases", methods=["POST"])
+def add_alias(entity_id):
+    _, _, get_db, _, _, _ = _get_deps()
+    from modules.db import add_entity_alias, record_audit
+
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+
+    with get_db() as conn:
+        if not conn.execute("SELECT 1 FROM entities WHERE id=?", (entity_id,)).fetchone():
+            abort(404)
+        if not add_entity_alias(conn, entity_id, name, source="manual"):
+            return jsonify({"error": "Alias is blank, duplicates an "
+                            "existing alias, or matches the entity's own name"}), 409
+        record_audit(conn, entity_type="entity", entity_id=entity_id,
+                     action="add_alias", new=name)
+
+    return jsonify({"ok": True})
+
+
+@bp.route("/api/entities/<int:entity_id>/aliases/<int:alias_id>", methods=["DELETE"])
+def delete_alias(entity_id, alias_id):
+    _, _, get_db, _, _, _ = _get_deps()
+    from modules.db import record_audit
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT name FROM entity_aliases WHERE id=? AND entity_id=?",
+            (alias_id, entity_id)
+        ).fetchone()
+        if not row:
+            abort(404)
+        conn.execute("DELETE FROM entity_aliases WHERE id=?", (alias_id,))
+        record_audit(conn, entity_type="entity", entity_id=entity_id,
+                     action="remove_alias", old=row["name"])
+
+    return jsonify({"ok": True})
