@@ -452,10 +452,23 @@ function renderGraph(data, svgEl, setSelected) {
       return
     }
 
-    // Dim non-matching nodes; illuminate matches with a gold ring
-    node.style('opacity', d => d.label?.toLowerCase().includes(q) ? 1 : 0.1)
+    // Matching nodes, plus every node directly connected to a match.
+    const matchIds = new Set(
+      nodes.filter(n => n.label?.toLowerCase().includes(q)).map(n => n.id)
+    )
+    const neighborIds = new Set()
+    for (const e of validEdges) {
+      const s = typeof e.source === 'object' ? e.source.id : e.source
+      const t = typeof e.target === 'object' ? e.target.id : e.target
+      if (matchIds.has(s)) neighborIds.add(t)
+      if (matchIds.has(t)) neighborIds.add(s)
+    }
+
+    // Matches and their neighbours stay lit; everything else dims.
+    // Only the matched nodes get the gold ring.
+    node.style('opacity', d => (matchIds.has(d.id) || neighborIds.has(d.id)) ? 1 : 0.1)
     node.each(function(d) {
-      const matches = d.label?.toLowerCase().includes(q)
+      const matches = matchIds.has(d.id)
       d3.select(this).select('circle')
         .attr('stroke', matches ? '#c9a84c' : 'white')
         .attr('stroke-width', matches ? 3.5 : 1.5)
@@ -463,12 +476,9 @@ function renderGraph(data, svgEl, setSelected) {
 
     // Boost edges touching a matching node; fade the rest
     link.attr('stroke-opacity', d => {
-      const src = typeof d.source === 'object' ? d.source : nodeById[d.source]
-      const tgt = typeof d.target === 'object' ? d.target : nodeById[d.target]
-      if (!src || !tgt) return 0
-      const srcM = src.label?.toLowerCase().includes(q)
-      const tgtM = tgt.label?.toLowerCase().includes(q)
-      return (srcM || tgtM) ? 0.75 : 0.08
+      const s = typeof d.source === 'object' ? d.source.id : d.source
+      const t = typeof d.target === 'object' ? d.target.id : d.target
+      return (matchIds.has(s) || matchIds.has(t)) ? 0.75 : 0.08
     })
   }
 
@@ -549,6 +559,17 @@ function _drawNodeIcon(el, type, nodeColor) {
           .attr('stroke', 'rgba(255,255,255,0.7)').attr('stroke-width', 1.3)
           .style('pointer-events', 'none')
       )
+      break
+    }
+
+    // ── Place: map pin (teardrop with a cut-out hole) ───────────────────────
+    case 'place': {
+      el.append('path')
+        .attr('d', 'M 0 7 C -4.5 1 -5 -3 0 -6 C 5 -3 4.5 1 0 7 Z')
+        .attr('fill', w).style('pointer-events', 'none')
+      el.append('circle')
+        .attr('cx', 0).attr('cy', -2).attr('r', 1.8)
+        .attr('fill', nodeColor).style('pointer-events', 'none')
       break
     }
 

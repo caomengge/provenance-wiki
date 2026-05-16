@@ -173,12 +173,14 @@ export default function Timeline() {
             </div>
           </div>
           <a
-            href="/api/export/timeline"
+            href={api.exportTimelineUrl({
+              ...(dateFrom && { date_from: dateFrom }),
+              ...(dateTo && { date_to: dateTo }),
+              ...(filterEntity && { entity_id: filterEntity }),
+            })}
             className="btn btn-ghost"
-            target="_blank"
-            rel="noreferrer"
           >
-            ↓ Export PDF
+            ↓ Export CSV
           </a>
         </div>
 
