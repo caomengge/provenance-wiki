@@ -5,7 +5,6 @@ import EntityTag from '../components/EntityTag'
 import AnnotationPanel from '../components/AnnotationPanel'
 import EvidenceFlag from '../components/EvidenceFlag'
 import TagManager from '../components/TagManager'
-import DocumentLinkModal from '../components/DocumentLinkModal'
 import InlineEdit from '../components/InlineEdit'
 import TransactionEditor from '../components/TransactionEditor'
 import EntityNameAutocomplete from '../components/EntityNameAutocomplete'
@@ -19,7 +18,6 @@ export default function DocumentDetail() {
   const [doc, setDoc]           = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
-  const [showLink, setShowLink] = useState(false)
   const [imgZoomed, setImgZoomed] = useState(false)
   const [showTranscription, setShowTranscription] = useState(false)
   const [rotating, setRotating] = useState(false)
@@ -125,16 +123,6 @@ export default function DocumentDetail() {
     }
   }
 
-  const handleDeleteLink = async (linkId) => {
-    if (!window.confirm('Remove this document link?')) return
-    try {
-      await api.deleteLink(id, linkId)
-      setDoc(prev => ({ ...prev, links: prev.links.filter(l => l.id !== linkId) }))
-    } catch (err) {
-      alert(err.message)
-    }
-  }
-
   // ── Entity management ───────────────────────────────────────────────────────
 
   const removeEntity = async (entityId) => {
@@ -235,15 +223,7 @@ export default function DocumentDetail() {
               setDoc(prev => ({ ...prev, is_key_evidence: v ? 1 : 0 }))
             }}
           />
-          <button className="btn btn-ghost" onClick={() => setShowLink(true)}>⛓ Link Document</button>
           <button className="btn btn-ghost" onClick={() => setShowTranscription(true)}>📄 Transcription</button>
-          <a
-            href="#"
-            className="btn btn-ghost"
-            onClick={(e) => { e.preventDefault(); window.open(`/api/export/selection`, '_blank') }}
-          >
-            ↓ PDF
-          </a>
           <button
             onClick={() => doc.is_trashed ? toggleTrash() : setTrashModalOpen(true)}
             style={{
@@ -456,29 +436,6 @@ export default function DocumentDetail() {
           {/* Transactions */}
           <TransactionEditor transactions={doc.transactions || []} docId={id} />
 
-          {/* Linked documents */}
-          {doc.links?.length > 0 && (
-            <div>
-              <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                Linked Documents
-              </h3>
-              {doc.links.map(link => {
-                const other = link.source_id == id ? { id: link.target_id, title: link.target_title } : { id: link.source_id, title: link.source_title }
-                return (
-                  <div key={link.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem', fontSize: '0.88rem' }}>
-                    <Link to={`/documents/${other.id}`} style={{ color: 'var(--navy-light)', fontWeight: 500 }}>
-                      {other.title || `Document #${other.id}`}
-                    </Link>
-                    <span style={{ color: 'var(--text-muted)' }}>— {link.relationship_type}</span>
-                    <button
-                      onClick={() => handleDeleteLink(link.id)}
-                      style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-light)', fontSize: '0.85rem' }}
-                    >Remove</button>
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </div>
 
         {/* Right: annotation / tags / entities */}
@@ -749,15 +706,6 @@ export default function DocumentDetail() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* Link modal */}
-      {showLink && (
-        <DocumentLinkModal
-          docId={doc.id}
-          onClose={() => setShowLink(false)}
-          onLinked={(link) => setDoc(prev => ({ ...prev, links: [...(prev.links || []), { ...link, id: Date.now() }] }))}
-        />
       )}
     </div>
   )
