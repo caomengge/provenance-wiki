@@ -562,6 +562,17 @@ function _drawNodeIcon(el, type, nodeColor) {
       break
     }
 
+    // ── Place: map pin (teardrop with a cut-out hole) ───────────────────────
+    case 'place': {
+      el.append('path')
+        .attr('d', 'M 0 7 C -4.5 1 -5 -3 0 -6 C 5 -3 4.5 1 0 7 Z')
+        .attr('fill', w).style('pointer-events', 'none')
+      el.append('circle')
+        .attr('cx', 0).attr('cy', -2).attr('r', 1.8)
+        .attr('fill', nodeColor).style('pointer-events', 'none')
+      break
+    }
+
     // ── Unknown: question mark ───────────────────────────────────────────────
     case 'unknown':
     default: {
