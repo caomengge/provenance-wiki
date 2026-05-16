@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS entities (
     UNIQUE(normalized_name, type)
 );
 
+-- ── Entity aliases (alternate names / "also known as") ──────────────────────
+CREATE TABLE IF NOT EXISTS entity_aliases (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_id       INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    name            TEXT    NOT NULL,
+    normalized_name TEXT    NOT NULL,
+    source          TEXT    NOT NULL DEFAULT 'merge',   -- 'merge' | 'manual'
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(entity_id, normalized_name)
+);
+
 -- ── Document ↔ Entity pivot ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS document_entities (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_documents_sha256          ON documents(sha256);
 CREATE INDEX IF NOT EXISTS idx_documents_date_depicted   ON documents(date_depicted);
 CREATE INDEX IF NOT EXISTS idx_documents_key_evidence    ON documents(is_key_evidence);
 CREATE INDEX IF NOT EXISTS idx_entities_normalized       ON entities(normalized_name, type);
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_entity     ON entity_aliases(entity_id);
+CREATE INDEX IF NOT EXISTS idx_entity_aliases_norm       ON entity_aliases(normalized_name);
 CREATE INDEX IF NOT EXISTS idx_doc_entities_doc          ON document_entities(document_id);
 CREATE INDEX IF NOT EXISTS idx_doc_entities_entity       ON document_entities(entity_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_doc          ON transactions(document_id);
@@ -433,11 +446,50 @@ def upsert_entity(conn: sqlite3.Connection, name: str, entity_type: str) -> int:
     if row:
         return row["id"]
 
+    # No entity with that name — check whether the name is a known alias of an
+    # existing entity (recorded by a prior merge or added manually). This makes
+    # ingestion resolve alternate names ("Larry Sickman" → "Laurence Sickman").
+    cur = conn.execute(
+        """SELECT a.entity_id FROM entity_aliases a
+           JOIN entities e ON e.id = a.entity_id
+           WHERE a.normalized_name=? AND e.type=?""",
+        (norm, entity_type)
+    )
+    row = cur.fetchone()
+    if row:
+        return row["entity_id"]
+
     cur = conn.execute(
         "INSERT INTO entities (name, normalized_name, type) VALUES (?,?,?)",
         (name.strip(), norm, entity_type)
     )
     return cur.lastrowid
+
+
+def add_entity_alias(conn: sqlite3.Connection, entity_id: int, name: str,
+                     source: str = "merge") -> bool:
+    """Record an alternate name for an entity.
+
+    Returns True if a new alias row was created, False if it was skipped
+    (blank name, or the name already matches the entity itself or an
+    existing alias). Safe to call repeatedly.
+    """
+    if not name or not name.strip():
+        return False
+    norm = normalize_entity_name(name)
+
+    ent = conn.execute(
+        "SELECT normalized_name FROM entities WHERE id=?", (entity_id,)
+    ).fetchone()
+    if not ent or ent["normalized_name"] == norm:
+        return False
+
+    cur = conn.execute(
+        """INSERT OR IGNORE INTO entity_aliases
+           (entity_id, name, normalized_name, source) VALUES (?,?,?,?)""",
+        (entity_id, name.strip(), norm, source)
+    )
+    return cur.rowcount > 0
 
 
 def get_or_create_tag(conn: sqlite3.Connection, name: str, color: str = "#c9a84c") -> int:

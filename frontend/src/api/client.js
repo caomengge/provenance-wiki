@@ -108,6 +108,12 @@ const api = {
   mergeEntities: (keepId, discardId) =>
     request('POST', '/api/entities/merge', { keep_id: keepId, discard_id: discardId }),
 
+  addEntityAlias: (id, name) =>
+    request('POST', `/api/entities/${id}/aliases`, { name }),
+
+  removeEntityAlias: (id, aliasId) =>
+    request('DELETE', `/api/entities/${id}/aliases/${aliasId}`),
+
   // ── Search ───────────────────────────────────────────────────────────────
   search: (params = {}) => {
     // URLSearchParams stringifies array values as comma-joined; the search
