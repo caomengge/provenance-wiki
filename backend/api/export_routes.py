@@ -1,8 +1,8 @@
 """
-export_routes.py – Flask Blueprint for PDF export.
+export_routes.py – Flask Blueprint for export.
 
 Routes:
-  GET  /api/export/timeline        – export timeline as PDF
+  GET  /api/export/timeline        – export timeline events as CSV
   GET  /api/export/entity/:id      – export entity provenance history as PDF
   POST /api/export/selection       – export selected document IDs as PDF dossier
 """
@@ -64,8 +64,17 @@ def _render_pdf(html: str) -> bytes:
 
 # ── Timeline export ───────────────────────────────────────────────────────────
 
+_TIMELINE_CSV_COLUMNS = [
+    "date", "type", "label", "doc_id", "doc_title",
+    "seller", "buyer", "price", "currency", "auction_house", "lot_number",
+    "location", "notes", "score", "entity_names", "medium", "is_key_evidence",
+]
+
+
 @bp.route("/api/export/timeline", methods=["GET"])
 def export_timeline():
+    """Export the (filtered) timeline's dated events as a CSV file."""
+    import csv
     from modules.timeline import get_timeline
 
     entity_id = request.args.get("entity_id", type=int)
@@ -76,49 +85,24 @@ def export_timeline():
     data = get_timeline(entity_id=entity_id, tag_id=tag_id,
                         date_from=date_from, date_to=date_to)
 
-    events = data["dated_events"]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_TIMELINE_CSV_COLUMNS,
+                            extrasaction="ignore")
+    writer.writeheader()
+    for ev in data["dated_events"]:
+        row = dict(ev)
+        names = row.get("entity_names")
+        if isinstance(names, list):
+            row["entity_names"] = "; ".join(names)
+        writer.writerow(row)
 
-    rows = ""
-    for ev in events:
-        key_class = " key" if ev.get("is_key_evidence") else ""
-        date_str  = ev.get("date") or "Unknown date"
-        label     = ev.get("label") or ev.get("doc_title") or "Event"
-
-        if ev["type"] == "transaction":
-            detail = f"<br/><small>{ev.get('seller','?')} → {ev.get('buyer','?')}"
-            if ev.get("price"):
-                detail += f" · {ev.get('currency','')} {ev['price']:,.0f}"
-            if ev.get("auction_house"):
-                detail += f" · {ev['auction_house']}"
-            detail += "</small>"
-        else:
-            detail = ""
-
-        rows += f"""<div class="event{key_class}">
-            <span class="date">{date_str}</span>
-            <div class="label">{label}{detail}</div>
-        </div>"""
-
-    html = _base_html("Provenance Timeline", f"""
-        <h1>Provenance Timeline</h1>
-        <div class="meta">
-            {len(events)} dated events
-            {f' · from {date_from}' if date_from else ''}
-            {f' · to {date_to}' if date_to else ''}
-        </div>
-        {rows or '<p><em>No events found.</em></p>'}
-    """)
-
-    try:
-        pdf_bytes = _render_pdf(html)
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 500
-
+    # UTF-8 BOM so Excel reads non-ASCII (Chinese, etc.) names correctly.
+    payload = ("﻿" + buf.getvalue()).encode("utf-8")
     return send_file(
-        io.BytesIO(pdf_bytes),
-        mimetype="application/pdf",
+        io.BytesIO(payload),
+        mimetype="text/csv",
         as_attachment=True,
-        download_name="provenance_timeline.pdf",
+        download_name="provenance_timeline.csv",
     )
 
 
