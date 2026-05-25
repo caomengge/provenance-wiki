@@ -215,6 +215,12 @@ const api = {
   getNetwork: (params = {}) =>
     request('GET', '/api/network?' + new URLSearchParams(params)),
 
+  refreshRelationships: () =>
+    request('POST', '/api/relationships/refresh'),
+
+  getRelationshipStatus: () =>
+    request('GET', '/api/relationships/status'),
+
   // ── Q&A ──────────────────────────────────────────────────────────────────
   askQuestion: (question) =>
     request('POST', '/api/qa', { question }),

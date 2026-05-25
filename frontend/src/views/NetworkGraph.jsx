@@ -41,6 +41,13 @@ export default function NetworkGraph() {
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTypes, setActiveTypes] = useState(new Set(DEFAULT_TYPES))
 
+  // Relationship overlay state
+  const [showRelationships, setShowRelationships] = useState(false)
+  const [selectedEdge,      setSelectedEdge]      = useState(null)
+  const [edgeDocs,          setEdgeDocs]          = useState([])
+  const [edgeDocsLoading,   setEdgeDocsLoading]   = useState(false)
+  const [relStatus,         setRelStatus]         = useState(null)
+
   // Entity document list state
   const [docsExpanded, setDocsExpanded] = useState(false)
   const [entityDocs,   setEntityDocs]   = useState([])
@@ -58,6 +65,7 @@ export default function NetworkGraph() {
       const params = { types: [...activeTypes].join(',') }
       const docId = searchParams.get('doc_id')
       if (docId) params.doc_id = docId
+      if (showRelationships) params.relationships = 'true'
       const res = await api.getNetwork(params)
       setData(res)
     } catch (err) {
@@ -65,15 +73,61 @@ export default function NetworkGraph() {
     } finally {
       setLoading(false)
     }
-  }, [searchParams, activeTypes])
+  }, [searchParams, activeTypes, showRelationships])
 
   useEffect(() => { load() }, [load])
+
+  // Initial fetch of refresh-job status (so the button reflects an in-flight run after reload)
+  useEffect(() => {
+    api.getRelationshipStatus().then(setRelStatus).catch(() => {})
+  }, [])
 
   // Re-render D3 graph whenever data changes; store the returned API ref
   useEffect(() => {
     if (!data || !svgRef.current) return
-    graphApiRef.current = renderGraph(data, svgRef.current, setSelected)
-  }, [data])
+    graphApiRef.current = renderGraph(data, svgRef.current, setSelected, setSelectedEdge, showRelationships)
+  }, [data, showRelationships])
+
+  // Poll the refresh job's status while it's running so the button can show progress
+  useEffect(() => {
+    if (!relStatus?.running) return
+    const tick = async () => {
+      try {
+        const s = await api.getRelationshipStatus()
+        setRelStatus(s)
+        if (!s.running && showRelationships) load()  // refresh data once done
+      } catch (err) { console.error(err) }
+    }
+    const id = setInterval(tick, 1500)
+    return () => clearInterval(id)
+  }, [relStatus?.running, showRelationships, load])
+
+  // Resolve evidence documents whenever a typed edge is selected
+  useEffect(() => {
+    if (!selectedEdge?.evidence_doc_ids?.length) { setEdgeDocs([]); return }
+    let cancelled = false
+    setEdgeDocsLoading(true)
+    Promise.all(
+      selectedEdge.evidence_doc_ids.map(id =>
+        api.getDocument(id).catch(() => null)
+      )
+    ).then(results => {
+      if (cancelled) return
+      setEdgeDocs(results.filter(Boolean))
+      setEdgeDocsLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [selectedEdge])
+
+  const refreshRelationships = async () => {
+    try {
+      const s = await api.refreshRelationships()
+      setRelStatus(s)
+    } catch (err) {
+      console.error(err)
+      alert('Could not start relationship refresh: ' + (err.message || err))
+    }
+  }
 
   // Re-apply the search highlight after a render or when the query changes
   useEffect(() => {
@@ -122,7 +176,13 @@ export default function NetworkGraph() {
           <div>
             <h1>Provenance Network</h1>
             <div className="subtitle">
-              {data ? `${data.stats.total_nodes} nodes · ${data.stats.total_edges} connections` : 'Loading…'}
+              {data
+                ? `${data.stats.total_nodes} nodes · ${data.stats.total_edges} connections${
+                    showRelationships && data.stats.total_typed_edges != null
+                      ? ` · ${data.stats.total_typed_edges} relationships`
+                      : ''
+                  }`
+                : 'Loading…'}
             </div>
           </div>
           <button className="btn btn-ghost" onClick={load}>↻ Refresh</button>
@@ -189,6 +249,47 @@ export default function NetworkGraph() {
               </button>
             )
           })}
+          {/* Relationship overlay toggle (people-only feature) */}
+          <span style={{ borderLeft: '1px solid var(--border)', height: '18px', margin: '0 0.3rem' }} />
+          <button
+            onClick={() => setShowRelationships(v => !v)}
+            title="Overlay LLM-inferred verbs between people"
+            style={{
+              padding:    '0.2rem 0.6rem',
+              border:     `1px solid ${showRelationships ? '#c9a84c' : 'var(--border)'}`,
+              borderRadius: '12px',
+              background:   showRelationships ? '#c9a84c1a' : 'transparent',
+              color:        showRelationships ? 'var(--text-body)' : 'var(--text-muted)',
+              fontSize:     '0.8rem',
+              cursor:       'pointer',
+              fontFamily:   'var(--font-serif)',
+              opacity:      showRelationships ? 1 : 0.7,
+            }}
+          >
+            {showRelationships ? '✓ ' : ''}Show relationships
+          </button>
+          {showRelationships && (
+            <button
+              onClick={refreshRelationships}
+              disabled={relStatus?.running}
+              title="Re-run LLM to (re)build all person↔person relationships"
+              style={{
+                padding:    '0.2rem 0.6rem',
+                border:     '1px solid var(--border)',
+                borderRadius: '12px',
+                background:   'transparent',
+                color:        'var(--text-muted)',
+                fontSize:     '0.78rem',
+                cursor:       relStatus?.running ? 'wait' : 'pointer',
+                fontFamily:   'var(--font-serif)',
+              }}
+            >
+              {relStatus?.running
+                ? `↻ Refreshing… ${relStatus.processed}/${relStatus.total}`
+                : '↻ Refresh relationships'}
+            </button>
+          )}
+
           {/* "Show all" shortcut — only visible when something is hidden */}
           {activeTypes.size < ALL_TYPES.length && (
             <button
@@ -319,6 +420,69 @@ export default function NetworkGraph() {
         )}
       </div>
 
+      {/* Typed-edge detail panel */}
+      {selectedEdge && (
+        <div style={{
+          position:   'absolute',
+          bottom:     '1rem',
+          right:      '1rem',
+          width:      '300px',
+          background: 'var(--cream-card)',
+          border:     '1px solid var(--border)',
+          borderRadius: '4px',
+          padding:    '1rem',
+          boxShadow:  '0 4px 12px var(--shadow-deep)',
+          maxHeight:  '50vh',
+          overflowY:  'auto',
+          zIndex:     10,
+        }}>
+          <button
+            onClick={() => setSelectedEdge(null)}
+            style={{ float: 'right', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: '1.1rem' }}
+          >×</button>
+          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
+            Relationship
+          </div>
+          <div style={{ fontWeight: 600, fontSize: '0.95rem', color: 'var(--navy)', marginBottom: '0.25rem' }}>
+            {selectedEdge.sourceLabel} <em style={{ color: '#9a7d2c' }}>{selectedEdge.verb}</em> {selectedEdge.targetLabel}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.6rem' }}>
+            Confidence: {(selectedEdge.confidence * 100).toFixed(0)}%
+          </div>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--navy-light)', marginBottom: '0.35rem' }}>
+            Evidence
+          </div>
+          {edgeDocsLoading ? (
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Loading…</div>
+          ) : edgeDocs.length === 0 ? (
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No evidence available</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              {edgeDocs.map(doc => (
+                <button
+                  key={doc.id}
+                  onClick={() => setPreviewDocId(doc.id)}
+                  style={{
+                    background: 'var(--cream-bg)',
+                    border: '1px solid var(--border)',
+                    borderRadius: '3px',
+                    padding: '0.3rem 0.5rem',
+                    fontSize: '0.8rem',
+                    color: 'var(--navy)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {(doc.title || doc.filename || `Document #${doc.id}`).substring(0, 40)}
+                  {doc.date_depicted ? ` · ${doc.date_depicted}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Document preview panel */}
       {previewDocId != null && (
         <DocPreviewPanel docId={previewDocId} onClose={() => setPreviewDocId(null)} />
@@ -331,8 +495,8 @@ export default function NetworkGraph() {
 // Returns { applyVisualState(query, types) } so React can imperatively
 // highlight or filter nodes without re-running the simulation.
 
-function renderGraph(data, svgEl, setSelected) {
-  const { nodes: rawNodes, edges: rawEdges } = data
+function renderGraph(data, svgEl, setSelected, setSelectedEdge, showRelationships) {
+  const { nodes: rawNodes, edges: rawEdges, typed_edges: rawTyped = [] } = data
   if (!rawNodes.length) return null
 
   const width  = svgEl.clientWidth  || 800
@@ -356,14 +520,85 @@ function renderGraph(data, svgEl, setSelected) {
 
   const validEdges = edges.filter(e => nodeById[e.source] && nodeById[e.target])
 
-  // ── Links ─────────────────────────────────────────────────────────────────
+  // ── Arrowhead marker for typed (directional) edges ────────────────────────
+  if (showRelationships && rawTyped.length) {
+    const defs = svg.append('defs')
+    defs.append('marker')
+      .attr('id', 'arrowhead')
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 14)
+      .attr('refY', 0)
+      .attr('markerWidth', 6)
+      .attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-4L8,0L0,4')
+      .attr('fill', '#9a7d2c')
+  }
+
+  // ── Co-occurrence links (existing, dimmed when overlay is on) ─────────────
+  const linkBaseOpacity = showRelationships ? 0.18 : 0.6
   const link = g.append('g')
     .selectAll('line')
     .data(validEdges)
     .join('line')
     .attr('stroke', '#d4c9a8')
-    .attr('stroke-opacity', 0.6)
+    .attr('stroke-opacity', linkBaseOpacity)
     .attr('stroke-width', d => Math.min(d.weight || 1, 4))
+
+  // ── Typed (verb-labeled) relationship edges ───────────────────────────────
+  // Drawn as paths (so we can curve parallel edges between the same pair) with
+  // an arrowhead at the target and a verb label along the line.
+  const typedEdges = showRelationships
+    ? rawTyped.filter(e => nodeById[e.source] && nodeById[e.target]).map(e => ({ ...e }))
+    : []
+
+  // Group parallel edges so we can spread them visually
+  const pairCounts = {}
+  typedEdges.forEach(e => {
+    const key = [e.source, e.target].sort().join('|')
+    e._pairKey   = key
+    pairCounts[key] = (pairCounts[key] || 0) + 1
+  })
+  const pairSeen = {}
+  typedEdges.forEach(e => {
+    pairSeen[e._pairKey] = (pairSeen[e._pairKey] || 0) + 1
+    e._pairIndex = pairSeen[e._pairKey] - 1
+    e._pairTotal = pairCounts[e._pairKey]
+  })
+
+  const typedLayer = g.append('g').attr('class', 'typed-edges')
+  const typedPath = typedLayer.selectAll('path')
+    .data(typedEdges)
+    .join('path')
+    .attr('fill', 'none')
+    .attr('stroke', '#9a7d2c')
+    .attr('stroke-width', 1.6)
+    .attr('stroke-opacity', 0.85)
+    .attr('marker-end', 'url(#arrowhead)')
+    .style('cursor', 'pointer')
+    .on('click', (event, d) => {
+      event.stopPropagation()
+      const src = typeof d.source === 'object' ? d.source : nodeById[d.source]
+      const tgt = typeof d.target === 'object' ? d.target : nodeById[d.target]
+      setSelectedEdge({
+        ...d,
+        sourceLabel: src?.label || '',
+        targetLabel: tgt?.label || '',
+      })
+    })
+
+  const typedLabel = typedLayer.selectAll('text')
+    .data(typedEdges)
+    .join('text')
+    .text(d => d.verb)
+    .attr('font-size', '9.5px')
+    .attr('font-family', 'var(--font-serif)')
+    .attr('font-style', 'italic')
+    .attr('fill', '#7a6422')
+    .attr('text-anchor', 'middle')
+    .style('pointer-events', 'none')
+    .style('user-select', 'none')
 
   // ── Node groups ───────────────────────────────────────────────────────────
   const node = g.append('g')
@@ -418,6 +653,45 @@ function renderGraph(data, svgEl, setSelected) {
       .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
       .attr('x2', d => d.target.x).attr('y2', d => d.target.y)
     node.attr('transform', d => `translate(${d.x},${d.y})`)
+
+    // Typed edges: curve parallel edges between the same pair so they fan out.
+    // Curvature is offset by edge index within its pair.
+    typedPath.attr('d', d => {
+      const s = typeof d.source === 'object' ? d.source : nodeById[d.source]
+      const t = typeof d.target === 'object' ? d.target : nodeById[d.target]
+      if (!s || !t) return ''
+      if (d._pairTotal <= 1) {
+        return `M${s.x},${s.y} L${t.x},${t.y}`
+      }
+      // Spread: -1, 0, +1, ... (in units of curvature)
+      const offset = (d._pairIndex - (d._pairTotal - 1) / 2) * 24
+      const mx = (s.x + t.x) / 2
+      const my = (s.y + t.y) / 2
+      const dx = t.x - s.x, dy = t.y - s.y
+      const len = Math.sqrt(dx * dx + dy * dy) || 1
+      const nx = -dy / len, ny = dx / len
+      const cx = mx + nx * offset, cy = my + ny * offset
+      return `M${s.x},${s.y} Q${cx},${cy} ${t.x},${t.y}`
+    })
+
+    typedLabel.attr('transform', d => {
+      const s = typeof d.source === 'object' ? d.source : nodeById[d.source]
+      const t = typeof d.target === 'object' ? d.target : nodeById[d.target]
+      if (!s || !t) return ''
+      const mx = (s.x + t.x) / 2
+      const my = (s.y + t.y) / 2
+      let cx = mx, cy = my
+      if (d._pairTotal > 1) {
+        const offset = (d._pairIndex - (d._pairTotal - 1) / 2) * 24
+        const dx = t.x - s.x, dy = t.y - s.y
+        const len = Math.sqrt(dx * dx + dy * dy) || 1
+        const nx = -dy / len, ny = dx / len
+        // Label sits at the midpoint of the curve (≈ halfway between mid and control)
+        cx = mx + nx * (offset * 0.5)
+        cy = my + ny * (offset * 0.5)
+      }
+      return `translate(${cx},${cy - 3})`
+    })
   }
 
   const simulation = d3.forceSimulation(nodes)
@@ -448,7 +722,9 @@ function renderGraph(data, svgEl, setSelected) {
       node.each(function() {
         d3.select(this).select('circle').attr('stroke', 'white').attr('stroke-width', 1.5)
       })
-      link.attr('stroke-opacity', 0.6)
+      link.attr('stroke-opacity', linkBaseOpacity)
+      typedPath.attr('stroke-opacity', 0.85)
+      typedLabel.style('opacity', 1)
       return
     }
 
@@ -478,7 +754,17 @@ function renderGraph(data, svgEl, setSelected) {
     link.attr('stroke-opacity', d => {
       const s = typeof d.source === 'object' ? d.source.id : d.source
       const t = typeof d.target === 'object' ? d.target.id : d.target
-      return (matchIds.has(s) || matchIds.has(t)) ? 0.75 : 0.08
+      return (matchIds.has(s) || matchIds.has(t)) ? 0.75 : 0.04
+    })
+    typedPath.attr('stroke-opacity', d => {
+      const s = typeof d.source === 'object' ? d.source.id : d.source
+      const t = typeof d.target === 'object' ? d.target.id : d.target
+      return (matchIds.has(s) || matchIds.has(t)) ? 0.95 : 0.1
+    })
+    typedLabel.style('opacity', d => {
+      const s = typeof d.source === 'object' ? d.source.id : d.source
+      const t = typeof d.target === 'object' ? d.target.id : d.target
+      return (matchIds.has(s) || matchIds.has(t)) ? 1 : 0.15
     })
   }
 
