@@ -11,6 +11,7 @@ view. The `types` filter selects which entity types appear; the view defaults
 to people only. Optional filtering by entity, tag, date range, or seed document.
 """
 
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -19,14 +20,15 @@ ALLOWED_TYPES = ("person", "object", "institution", "place", "unknown")
 
 
 def get_network(
-    types:       tuple = ("person",),
-    entity_id:   int | None = None,
-    tag_id:      int | None = None,
-    doc_id:      int | None = None,
-    date_from:   str | None = None,
-    date_to:     str | None = None,
-    max_nodes:   int = 400,
-    min_weight:  int = 1,
+    types:         tuple = ("person",),
+    entity_id:     int | None = None,
+    tag_id:        int | None = None,
+    doc_id:        int | None = None,
+    date_from:     str | None = None,
+    date_to:       str | None = None,
+    max_nodes:     int  = 400,
+    min_weight:    int  = 1,
+    relationships: bool = False,
 ) -> dict:
     """
     Build the entity co-occurrence network payload.
@@ -150,12 +152,45 @@ def get_network(
     node_list = list(nodes.values())
     edge_list = list(edges.values())
 
+    # ── Typed (LLM-inferred) relationship edges ──────────────────────────────
+    # Only included when explicitly requested. Limited to person↔person pairs
+    # where both endpoints are present in `nodes` (otherwise the edge would
+    # dangle once the co-occurrence pass dropped them).
+    typed_edges: list = []
+    if relationships:
+        from modules.db import get_db
+        person_db_ids = {
+            n["db_id"] for n in node_list if n.get("type") == "person"
+        }
+        if person_db_ids:
+            with get_db() as conn:
+                ph = ",".join("?" * len(person_db_ids))
+                ids = list(person_db_ids)
+                rows = conn.execute(
+                    f"""SELECT source_entity_id, target_entity_id, verb,
+                               confidence, evidence_doc_ids
+                          FROM entity_relationships
+                         WHERE source_entity_id IN ({ph})
+                           AND target_entity_id IN ({ph})""",
+                    ids + ids,
+                ).fetchall()
+                for r in rows:
+                    typed_edges.append({
+                        "source":           f"ent_{r['source_entity_id']}",
+                        "target":           f"ent_{r['target_entity_id']}",
+                        "verb":             r["verb"],
+                        "confidence":       r["confidence"],
+                        "evidence_doc_ids": json.loads(r["evidence_doc_ids"] or "[]"),
+                    })
+
     return {
         "nodes": node_list,
         "edges": edge_list,
+        "typed_edges": typed_edges,
         "stats": {
-            "total_nodes": len(node_list),
-            "total_edges": len(edge_list),
+            "total_nodes":       len(node_list),
+            "total_edges":       len(edge_list),
+            "total_typed_edges": len(typed_edges),
         },
     }
 

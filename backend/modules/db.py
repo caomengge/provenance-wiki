@@ -231,6 +231,34 @@ CREATE TABLE IF NOT EXISTS group_tags (
     UNIQUE(group_id, tag_id)
 );
 
+-- ── Entity relationships (LLM-inferred verb edges between people) ────────────
+CREATE TABLE IF NOT EXISTS entity_relationships (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_entity_id  INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    target_entity_id  INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+    verb              TEXT    NOT NULL,
+    confidence        REAL    NOT NULL DEFAULT 0,
+    evidence_doc_ids  TEXT    NOT NULL DEFAULT '[]',  -- JSON array of document ids
+    generated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(source_entity_id, target_entity_id, verb)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ent_rel_source ON entity_relationships(source_entity_id);
+CREATE INDEX IF NOT EXISTS idx_ent_rel_target ON entity_relationships(target_entity_id);
+
+-- ── Relationship refresh runs (status of batch backfill jobs) ────────────────
+CREATE TABLE IF NOT EXISTS relationship_runs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT,
+    total        INTEGER NOT NULL DEFAULT 0,
+    processed    INTEGER NOT NULL DEFAULT 0,
+    created      INTEGER NOT NULL DEFAULT 0,
+    errors       INTEGER NOT NULL DEFAULT 0,
+    status       TEXT    NOT NULL DEFAULT 'running',  -- 'running' | 'done' | 'crashed'
+    error_message TEXT
+);
+
 -- ── Ingest runs (log of each ingestion batch) ────────────────────────────────
 CREATE TABLE IF NOT EXISTS ingest_runs (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
