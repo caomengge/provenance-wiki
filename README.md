@@ -1,4 +1,4 @@
-# Provenance Archive Wiki
+# Provenance Wiki
 
 A local research wiki for museum archival provenance research. Processes photos of historical documents using Claude AI to extract structured provenance data, then lets you search, browse, visualize, and ask questions about your archive.
 
