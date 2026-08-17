@@ -151,7 +151,7 @@ Select multiple pages in the Gallery and click **Group** to combine them into on
 ### Search
 - **Keyword search**: SQLite FTS5 with BM25 ranking, highlights matching terms
 - **Semantic search**: cosine similarity over real neural embeddings (Voyage AI `voyage-4` by default) of chunk-level retrieval representations — both primary-source **transcription chunks** and **AI-generated representations** (title/description/entities/transactions/tags), fused per document with reciprocal rank fusion
-- **Hybrid mode** (`/api/search?mode=hybrid`): keyword + both semantic lists fused with reciprocal rank fusion — the same engine the Q&A assistant uses
+- **Hybrid mode** (`/api/search?mode=hybrid`): keyword over transcriptions + both semantic lists fused with reciprocal rank fusion — the same engine the Q&A assistant uses. The keyword channel searches primary-source transcriptions only, so AI-generated text can never produce a keyword hit
 - If the embedding provider is unavailable, semantic/hybrid requests fall back to keyword search and say so explicitly (`semantic_available: false`); the legacy hashed bag-of-words vectors are never used
 - Filter by source archive; click an entity from the Entities page to filter results to that entity (chip with × to clear)
 
@@ -175,7 +175,7 @@ Chronological view of all provenance events. Filter by date range or by entity (
 Interactive force-directed graph showing relationships between documents, people, objects, and institutions. Click nodes to see details.
 
 ### Research Assistant (Q&A)
-Ask natural-language provenance questions. The system retrieves the most relevant documents via true hybrid retrieval (keyword + semantic over transcriptions + semantic over generated representations, reciprocal-rank-fused) and builds a context grounded in the **actual retrieved transcription excerpts** — with document ID, title, source archive, date, and representation type on every context item. AI-generated descriptions are included only as clearly-labelled finding aids, never as evidence. Answers cite `[Doc #N]` / `[Group #N]` so every claim can be inspected against the underlying archival document.
+Ask natural-language provenance questions. The system retrieves the most relevant documents via true hybrid retrieval (keyword over transcriptions + semantic over transcriptions + semantic over generated representations, reciprocal-rank-fused), then runs an **evidence-hydration** stage: for every selected document it fetches the most query-relevant transcription passages from within that document — even when the document was discovered only through its AI-generated representation. The response keeps *why a document was found* (`discovery_matches`) distinct from *the passages supplied as evidence* (`evidence_chunks`). AI-generated descriptions are included only as clearly-labelled finding aids, never as evidence, and a document with no transcription is flagged so no historical claim rests on generated metadata alone. Answers cite `[Doc #N]` / `[Group #N]` and report `source_count` plus retrieval metadata (the old citation-count `confidence` field is deprecated — always null — since citation count is not a valid measure of evidentiary confidence).
 
 Example questions:
 - "Who owned this artwork before 1939?"

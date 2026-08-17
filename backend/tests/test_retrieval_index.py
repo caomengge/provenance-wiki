@@ -417,6 +417,134 @@ def test_search_documents_semantic_and_fallback(test_db, fake_backend, monkeypat
     assert res["requested_mode"] == "semantic"
 
 
+def test_keyword_channel_searches_transcription_only(test_db, fake_backend):
+    """A term appearing ONLY in an AI-generated representation must not
+    produce a hit through the keyword-transcription channel."""
+    _backfill(fake_backend)
+    with dbmod.get_db() as conn:
+        # 'stele' appears only in doc #5's generated representation
+        # (description/title); doc #5 has no transcription at all.
+        default_hits = retrieval_mod.keyword_candidates(conn, "stele")
+        assert default_hits == []                       # production default
+        # explicit opt-in for experiments still reaches generated text
+        exp_hits = retrieval_mod.keyword_candidates(conn, "stele",
+                                                    representation_type=None)
+        assert any(h["unit_id"] == 5 and h["representation_type"] == "generated"
+                   for h in exp_hits)
+        # hybrid fusion records the restricted keyword scope, and doc #5 can
+        # only ever arrive via the semantic-generated channel — its keyword
+        # rank must be None even though 'stele' appears in its generated text
+        out = retrieval_mod.hybrid_retrieve(conn, "stele", top_k=10)
+        assert out["fusion"]["keyword_representation"] == "transcription"
+        assert all(u["keyword_rank"] is None for u in out["results"])
+        doc5 = next(u for u in out["results"]
+                    if (u["record_type"], u["unit_id"]) == ("document", 5))
+        assert doc5["semantic_generated_rank"] is not None
+
+
+def test_keyword_only_fallback_cannot_surface_generated_terms(test_db, fake_backend, monkeypatch):
+    """With the provider down (keyword-only degradation), a generated-only
+    term finds nothing — generated text never leaks into keyword retrieval."""
+    _backfill(fake_backend)
+    monkeypatch.setattr(retrieval_mod, "get_embedding_backend",
+                        lambda p=None, m=None: FailingBackend())
+    with dbmod.get_db() as conn:
+        out = retrieval_mod.hybrid_retrieve(conn, "stele", top_k=5)
+    assert out["semantic_available"] is False
+    assert out["results"] == []
+
+
+# ── Evidence hydration ────────────────────────────────────────────────────────
+
+def test_hydration_picks_most_relevant_chunk_semantic_and_keyword(test_db, fake_backend, monkeypatch):
+    """Within a multi-chunk unit, hydration returns the chunks most relevant
+    to the query — semantically when available, by term overlap otherwise."""
+    _backfill(fake_backend)
+    with dbmod.get_db() as conn:
+        unit = {"unit_id": 2, "record_type": "document"}   # doc 2 has 3+ chunks
+        retrieval_mod.hydrate_evidence(conn, "bronze vessel crated Shanghai",
+                                       [unit], top_n=1)
+        assert unit["has_transcription"] is True
+        assert unit["evidence_chunks"][0]["method"] == "semantic"
+        assert "Shanghai" in unit["evidence_chunks"][0]["text"]
+
+        # keyword fallback when the provider is down
+        monkeypatch.setattr(retrieval_mod, "get_embedding_backend",
+                            lambda p=None, m=None: FailingBackend())
+        unit2 = {"unit_id": 2, "record_type": "document"}
+        retrieval_mod.hydrate_evidence(conn, "payment final remark", [unit2],
+                                       top_n=1)
+        assert unit2["evidence_chunks"][0]["method"] == "keyword"
+        assert "payment" in unit2["evidence_chunks"][0]["text"]
+
+
+def test_generated_only_discovery_still_yields_primary_evidence(test_db, fake_backend, monkeypatch):
+    """A document discovered ONLY through its generated representation must
+    still supply its most query-relevant transcription passage to Q&A."""
+    with dbmod.get_db() as conn:
+        # Transcription (two chunks after packing) never mentions the dealer;
+        # the dealer's name exists only in the generated representation.
+        para1 = "The weather in Peking has been unusually cold this winter. " * 8
+        para2 = "The kiln fired celadon glaze wares arrived without damage. " * 8
+        conn.execute(
+            f"""INSERT INTO documents (id, filename, sha256, title, description,
+                transcription, source_archive)
+                VALUES (7,'g.jpg','sha7','Letter concerning shipment',
+                        'AI description: letter about wares',
+                        '{para1}\n\n{para2}','Cleveland Museum of Art')""")
+        conn.execute("INSERT INTO entities (id,name,normalized_name,type) "
+                     "VALUES (102,'Zzyzx Marchant','zzyzx marchant','person')")
+        conn.execute("INSERT INTO document_entities (document_id, entity_id, role) "
+                     "VALUES (7,102,'dealer')")
+    _backfill(fake_backend)
+
+    with dbmod.get_db() as conn:
+        out = retrieval_mod.hybrid_retrieve(conn, "Zzyzx Marchant", top_k=3)
+        top = out["results"][0]
+        # discovered exclusively via the generated representation:
+        assert (top["record_type"], top["unit_id"]) == ("document", 7)
+        assert top["keyword_rank"] is None                       # name absent from transcription
+        assert top["semantic_generated_rank"] == 1
+        assert all(m["representation_type"] == "generated"
+                   for m in top["discovery_matches"]
+                   if m["rank"] == 1 and m["list"] == "semantic_generated")
+
+        # …but hydration still attaches primary-source passages:
+        retrieval_mod.hydrate_evidence(conn, "Zzyzx Marchant celadon wares",
+                                       out["results"],
+                                       query_vec=out["_query_vec"])
+        assert top["has_transcription"] is True
+        assert top["evidence_chunks"]
+        assert "celadon" in top["evidence_chunks"][0]["text"]    # most relevant chunk
+        # discovery and evidence remain distinct records
+        assert top["evidence_chunks"][0]["chunk_id"] not in {
+            m["chunk_id"] for m in top["discovery_matches"]
+            if m["representation_type"] == "generated"}
+
+    # And end-to-end: Q&A passes that passage to Claude as primary evidence.
+    captured = {}
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class _Resp:
+                content = [type("B", (), {"text": "See [Doc #7]."})()]
+            return _Resp()
+
+    class _FakeAnthropic:
+        def __init__(self, api_key=None):
+            self.messages = _FakeMessages()
+
+    from modules import qa as qa_mod
+    monkeypatch.setattr(qa_mod.anthropic, "Anthropic", _FakeAnthropic)
+    out = qa_mod.answer_question("What did Zzyzx Marchant handle?", "test-key")
+    prompt = captured["messages"][0]["content"]
+    assert "celadon glaze wares" in prompt               # hydrated primary source
+    item = next(i for i in out["context_items"]
+                if (i["record_type"], i["id"]) == ("document", 7))
+    assert item["evidence_chunks"] and item["has_transcription"]
+
+
 # ── Q&A context ───────────────────────────────────────────────────────────────
 
 def test_qa_receives_actual_transcription_excerpts(test_db, fake_backend, monkeypatch):
@@ -442,14 +570,26 @@ def test_qa_receives_actual_transcription_excerpts(test_db, fake_backend, monkey
     prompt = captured["messages"][0]["content"]
     # actual primary-source excerpt, with archive + labelled generated metadata
     assert "purchased quietly in Peking" in prompt
-    assert "PRIMARY-SOURCE EXCERPT" in prompt
+    assert "PRIMARY-SOURCE EVIDENCE" in prompt
     assert "Source archive: Nelson-Atkins" in prompt
     assert "Machine-generated description" in prompt
     assert out["retrieval"]["mode"] == "hybrid"
     assert out["citations"][0]["doc_id"] == 1
     assert out["citations"][0]["record_type"] == "document"
     assert out["citations"][0]["source_archive"] == "Nelson-Atkins"
-    assert out["confidence"] in ("medium", "high")
+    # confidence is DEPRECATED (was citation-count-derived); replaced by
+    # source_count + retrieval metadata
+    assert out["confidence"] is None
+    assert out["source_count"] == len(out["sources"]) > 0
+    assert out["retrieval"]["semantic_available"] is True
+    assert out["retrieval"]["provider"] == "fake"
+    # discovery vs evidence separation is exposed for the frontend
+    item = next(i for i in out["context_items"]
+                if (i["record_type"], i["id"]) == ("document", 1))
+    assert item["has_transcription"] is True
+    assert item["discovery_matches"] and item["evidence_chunks"]
+    assert item["evidence_chunks"][0]["method"] == "semantic"
+    assert "purchased quietly" in item["evidence_chunks"][0]["text"]
 
 
 # ── Migration safety ──────────────────────────────────────────────────────────

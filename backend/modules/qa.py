@@ -3,21 +3,35 @@ qa.py – Retrieval-Augmented Generation Q&A engine.
 
 Pipeline:
   1. Retrieve the most relevant retrieval units via TRUE hybrid retrieval
-     (modules/retrieval.py): BM25 keyword + semantic-over-transcription +
-     semantic-over-generated, fused with reciprocal rank fusion. If the
-     embedding provider is unavailable, retrieval degrades to keyword-only
-     and the response says so — never a silent substitution.
-  2. Build a grounded context whose PRIMARY EVIDENCE is the actual
-     transcription excerpts retrieved from the archival documents. Each
-     context item preserves: document/group ID, title, source archive,
-     date, the relevant excerpt, and its representation type. AI-generated
-     descriptions supplement the evidence but are explicitly labelled as
-     machine-generated and never replace transcription text.
-  3. Pull matching transactions for the retrieved units.
-  4. Send to Claude with a system prompt that requires citation of
+     (modules/retrieval.py): BM25 keyword over transcriptions +
+     semantic-over-transcription + semantic-over-generated, fused with
+     reciprocal rank fusion. If the embedding provider is unavailable,
+     retrieval degrades to keyword-only and the response says so — never a
+     silent substitution.
+  2. EVIDENCE HYDRATION (retrieval.hydrate_evidence): for every selected
+     unit that has transcription, fetch the most query-relevant
+     transcription chunks from within that unit — even when the unit was
+     discovered only through its AI-generated representation. Discovery
+     and evidence are kept distinct: `discovery_matches` records why a
+     unit was retrieved; `evidence_chunks` are the primary-source passages
+     supplied for historical interpretation.
+  3. Build a grounded context whose PRIMARY-SOURCE EVIDENCE is those
+     hydrated transcription passages. Each context item preserves:
+     document/group ID, title, source archive, date, excerpt, and
+     representation type. AI-generated descriptions supplement the
+     evidence but are explicitly labelled machine-generated finding aids
+     and never replace transcription text; a unit with no transcription is
+     flagged so no substantive historical claim rests on generated
+     metadata alone.
+  4. Pull matching transactions for the retrieved units.
+  5. Send to Claude with a system prompt that requires citation of
      [Doc #N] / [Group #N] and forbids speculation beyond the evidence.
-  5. Return {answer, sources, confidence, citations, retrieval} so the
-     underlying documents can be inspected directly.
+  6. Return {answer, sources, source_count, citations, context_items,
+     retrieval} so the underlying documents can be inspected directly and
+     the frontend can later show both "why this document was found" and
+     "passage used as evidence". The legacy `confidence` field is
+     DEPRECATED (always null): citation count is not a valid measure of
+     evidentiary confidence.
 """
 
 import logging
@@ -37,8 +51,9 @@ Rules:
 4. If the answer is not in the provided documents, say so clearly: "The available documents do not contain information about this."
 5. For ownership chains, present them chronologically.
 6. Note any gaps or uncertainties in the provenance record, and mention the source archive a document comes from when it matters.
-7. Preserve non-English names and terms exactly as they appear in the source documents.
-8. Be concise but thorough. Prefer bullet points for ownership chains."""
+7. A document marked "no transcription available" has only machine-generated metadata. You may mention it as a lead worth consulting, but never make a substantive historical claim that rests solely on its machine-generated metadata.
+8. Preserve non-English names and terms exactly as they appear in the source documents.
+9. Be concise but thorough. Prefer bullet points for ownership chains."""
 
 QA_CONTEXT_TEMPLATE = """PROVENANCE DOCUMENTS FOR CONTEXT
 =================================
@@ -59,31 +74,30 @@ MAX_EXCERPT_CHARS = 4000
 
 def _context_block(conn, unit: dict) -> str:
     """
-    One context block for a retrieved unit. The retrieved transcription
-    excerpt is the primary evidence; generated metadata is labelled.
+    One context block for a retrieved unit. The HYDRATED transcription
+    passages (evidence_chunks — the most query-relevant passages from
+    within this unit, regardless of how the unit was discovered) are the
+    primary evidence; generated metadata is a labelled finding aid.
     """
     label = "Doc" if unit["record_type"] == "document" else "Group"
     lines = [f"[{label} #{unit['unit_id']}] {unit.get('title') or 'Untitled'}"]
     lines.append(f"Source archive: {unit.get('source_archive') or 'Unknown'}")
     lines.append(f"Date: {unit.get('date_display') or 'Unknown'}")
 
-    # Primary evidence: transcription chunks retrieved for this unit
-    # (deduplicated, in chunk order), else the unit's best excerpt.
-    t_chunks = {}
-    for c in unit.get("matched_chunks", []):
-        if c["representation_type"] == "transcription":
-            t_chunks.setdefault(c["chunk_index"], c["text"])
-    excerpt = "\n[…]\n".join(t_chunks[i] for i in sorted(t_chunks))
-    if not excerpt and unit.get("representation_type") == "transcription":
-        excerpt = unit.get("excerpt") or ""
+    # Primary evidence: hydrated transcription passages, in document order.
+    evidence = sorted(unit.get("evidence_chunks") or [],
+                      key=lambda c: c["chunk_index"])
+    excerpt = "\n[…]\n".join(c["text"] for c in evidence)
     if excerpt:
         if len(excerpt) > MAX_EXCERPT_CHARS:
             excerpt = excerpt[:MAX_EXCERPT_CHARS] + "\n[…excerpt truncated…]"
-        lines.append("PRIMARY-SOURCE EXCERPT (transcription, retrieved passage):")
+        lines.append("PRIMARY-SOURCE EVIDENCE (transcription passages most "
+                     "relevant to the question):")
         lines.append(excerpt)
     else:
-        lines.append("PRIMARY-SOURCE EXCERPT: (no transcription passage retrieved "
-                     "for this record)")
+        lines.append("PRIMARY-SOURCE EVIDENCE: none — no transcription available "
+                     "for this record. Only machine-generated metadata exists; "
+                     "treat this record as a finding aid, not as evidence.")
 
     # Supplementary, clearly labelled machine-generated description.
     table = "documents" if unit["record_type"] == "document" else "document_groups"
@@ -98,22 +112,66 @@ def _context_block(conn, unit: dict) -> str:
     return "\n".join(lines)
 
 
+def _context_item_meta(unit: dict) -> dict:
+    """
+    Serialisable discovery/evidence metadata for one context unit, so the
+    frontend can later show "why this document was found" alongside
+    "passage used as evidence".
+    """
+    discovery = [{
+        "list": c["list"],
+        "rank": c["rank"],
+        "score": c["score"],
+        "representation_type": c["representation_type"],
+        "chunk_index": c["chunk_index"],
+        "snippet": (c["text"] or "")[:300],
+    } for c in unit.get("discovery_matches", [])]
+    return {
+        "id": unit["unit_id"],
+        "record_type": unit["record_type"],
+        "title": unit.get("title"),
+        "source_archive": unit.get("source_archive"),
+        "date": unit.get("date_display"),
+        "fused_rank": unit.get("fused_rank"),
+        "fused_score": unit.get("fused_score"),
+        "keyword_rank": unit.get("keyword_rank"),
+        "semantic_transcription_rank": unit.get("semantic_transcription_rank"),
+        "semantic_generated_rank": unit.get("semantic_generated_rank"),
+        "has_transcription": unit.get("has_transcription", False),
+        "discovery_matches": discovery,
+        "evidence_chunks": [{
+            "chunk_id": c["chunk_id"],
+            "chunk_index": c["chunk_index"],
+            "chunk_count": c["chunk_count"],
+            "method": c["method"],
+            "score": c["score"],
+            "text": c["text"],
+        } for c in unit.get("evidence_chunks", [])],
+    }
+
+
 def answer_question(question: str, api_key: str) -> dict[str, Any]:
     """
     Run the full Q&A pipeline for a provenance research question.
 
     Returns:
         {
-            answer:     str,
-            sources:    [{id, record_type}],
-            confidence: 'high' | 'medium' | 'low' | 'none',
-            citations:  [{doc_id, record_type, title, source_archive, snippet}],
-            retrieval:  {mode, semantic_available, semantic_error, fusion,
-                         provider, model},
+            answer:        str,
+            sources:       [{id, record_type}],
+            source_count:  int,
+            confidence:    None (DEPRECATED — kept for frontend
+                           compatibility only; citation count is not a
+                           valid measure of evidentiary confidence),
+            citations:     [{doc_id, record_type, title, source_archive,
+                             snippet}],
+            context_items: [{id, record_type, ..., discovery_matches,
+                             evidence_chunks, has_transcription}],
+            retrieval:     {mode, semantic_available, semantic_error,
+                            fusion, provider, model},
         }
     """
     from modules.db import get_db
-    from modules.retrieval import hybrid_retrieve
+    from modules.retrieval import hybrid_retrieve, hydrate_evidence
     from config import QA_CONTEXT_DOCS, QA_MAX_TOKENS
 
     with get_db() as conn:
@@ -131,17 +189,25 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
 
         if not units:
             return {
-                "answer":     "No relevant documents were found in the archive for this question.",
-                "sources":    [],
-                "confidence": "none",
-                "citations":  [],
-                "retrieval":  retrieval_meta,
+                "answer":       "No relevant documents were found in the archive for this question.",
+                "sources":      [],
+                "source_count": 0,
+                "confidence":   None,   # DEPRECATED
+                "citations":    [],
+                "context_items": [],
+                "retrieval":    retrieval_meta,
             }
+
+        # Evidence hydration: attach the most query-relevant transcription
+        # passages from within each selected unit (reusing the query
+        # embedding when semantic retrieval ran; keyword fallback otherwise).
+        hydrate_evidence(conn, question, units,
+                         query_vec=retrieval.get("_query_vec"))
 
         doc_ids   = [u["unit_id"] for u in units if u["record_type"] == "document"]
         group_ids = [u["unit_id"] for u in units if u["record_type"] == "group"]
 
-        # Context blocks grounded in retrieved transcription excerpts.
+        # Context blocks grounded in the hydrated transcription passages.
         doc_blocks = [_context_block(conn, u) for u in units]
 
         # Matching transactions for the retrieved units.
@@ -190,12 +256,14 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Claude Q&A failed")
         return {
-            "answer":     f"Error calling Claude API: {exc}",
-            "sources":    [{"id": u["unit_id"], "record_type": u["record_type"]}
-                           for u in units],
-            "confidence": "none",
-            "citations":  [],
-            "retrieval":  retrieval_meta,
+            "answer":       f"Error calling Claude API: {exc}",
+            "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
+                             for u in units],
+            "source_count": len(units),
+            "confidence":   None,   # DEPRECATED
+            "citations":    [],
+            "context_items": [_context_item_meta(u) for u in units],
+            "retrieval":    retrieval_meta,
         }
 
     # Extract cited IDs, keeping doc/group namespaces distinct.
@@ -203,20 +271,12 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
     for label, num in re.findall(r"\[(Doc|Group)\s*#(\d+)\]", answer_text):
         cited.add(("document" if label == "Doc" else "group", int(num)))
 
-    if len(cited) >= 3:
-        confidence = "high"
-    elif len(cited) >= 1:
-        confidence = "medium"
-    elif ("do not contain" in answer_text.lower()
-          or "no information" in answer_text.lower()):
-        confidence = "none"
-    else:
-        confidence = "low"
-
     citations = []
     for u in units:
         if (u["record_type"], u["unit_id"]) in cited:
-            snippet = (u.get("excerpt") or "")[:200]
+            evidence = u.get("evidence_chunks") or []
+            snippet = (evidence[0]["text"] if evidence
+                       else (u.get("excerpt") or ""))[:200]
             citations.append({
                 "doc_id":              u["unit_id"],
                 "record_type":         u["record_type"],
@@ -224,14 +284,21 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
                 "source_archive":      u.get("source_archive"),
                 "date":                u.get("date_display"),
                 "representation_type": u.get("representation_type"),
+                "has_transcription":   u.get("has_transcription", False),
                 "snippet":             snippet,
             })
 
     return {
-        "answer":     answer_text,
-        "sources":    [{"id": u["unit_id"], "record_type": u["record_type"]}
-                       for u in units],
-        "confidence": confidence,
-        "citations":  citations,
-        "retrieval":  retrieval_meta,
+        "answer":       answer_text,
+        "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
+                         for u in units],
+        "source_count": len(units),
+        # DEPRECATED: always None. The old high/medium/low value was derived
+        # from citation count, which is not a valid measure of evidentiary
+        # confidence. Kept (as null) only so existing frontend code that
+        # checks `entry.confidence` degrades gracefully.
+        "confidence":   None,
+        "citations":    citations,
+        "context_items": [_context_item_meta(u) for u in units],
+        "retrieval":    retrieval_meta,
     }

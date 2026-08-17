@@ -301,11 +301,16 @@ def main():
                     return f"{prefix}#{s.get('id')}"
                 return f"#{s}"
 
+            meta = result.get("retrieval") or {}
             lines = [
                 result["answer"],
                 "",
-                f"**Confidence:** {result.get('confidence','?')}",
-                f"**Source documents:** {', '.join(_src_label(s) for s in result.get('sources', []))}",
+                f"**Sources consulted:** {result.get('source_count', len(result.get('sources', [])))} "
+                f"({', '.join(_src_label(s) for s in result.get('sources', []))})",
+                f"**Retrieval:** {meta.get('mode', '?')}"
+                + (f" — {meta.get('provider')}/{meta.get('model')}" if meta.get("provider") else "")
+                + ("" if meta.get("semantic_available", True)
+                   else " (semantic unavailable — keyword only)"),
             ]
             return [types.TextContent(type="text", text="\n".join(lines))]
 

@@ -141,3 +141,18 @@ No schema redesign needed for this milestone; nothing blocks the future multi-pr
 9. `scripts/reindex.py` CLI (backfill, incremental reindex, retry, status, explicit `--provider/--model` migration path).
 10. Tests (fake embedding provider; temp DBs through the real `init_db` migration) covering the full required list, then run the whole suite including the existing experiment tests.
 11. Deliver files back to the working folder; you run `pip install voyageai`, add `VOYAGE_API_KEY` to `.env` (it is not there yet), and run `python scripts/reindex.py` once as the backfill.
+
+---
+
+## Addendum — corrections applied 2026-08-17 (post-review)
+
+**1. Keyword channel restricted to primary-source transcription.**
+`keyword_candidates()` now defaults to `representation_type="transcription"`, and `hybrid_retrieve()` exposes `keyword_representation` (default `"transcription"`; pass `None` or `"generated"` explicitly for experiments). AI-generated representations can no longer produce a keyword hit in production hybrid retrieval or in its keyword-only degradation path. The applied scope is recorded in the response (`fusion.keyword_representation`). Production hybrid = keyword-over-transcription + semantic-over-transcription + semantic-over-generated.
+
+**2. Evidence hydration for RAG (`retrieval.hydrate_evidence`).**
+After fusion selects the top units, Q&A hydrates evidence per unit: for every selected unit that has transcription, the top 1–2 transcription chunks *from within that unit* are retrieved against the original query — by cosine similarity when embeddings are available, by deterministic term-overlap otherwise (ties break on document order, so a unit always yields its opening passage rather than nothing). The result keeps two distinct records on every unit: `discovery_matches` (why the unit was retrieved — list, rank, score, representation type, snippet) and `evidence_chunks` (passages supplied for historical interpretation — chunk id/index, method, score, full text). The QA context template now feeds hydrated passages as "PRIMARY-SOURCE EVIDENCE"; a unit with no transcription is explicitly flagged, the system prompt forbids substantive claims resting solely on machine-generated metadata, and generated descriptions remain labelled finding aids. The full discovery/evidence metadata is returned as `context_items` for future frontend display. The query embedding computed during retrieval is reused (`_query_vec`) so hydration adds no extra API call.
+
+**3. Citation-count confidence removed.**
+The high/medium/low `confidence` derived from the number of cited documents is deprecated: the field is retained as `null` only because the current QA frontend reads `entry.confidence` (its falsiness guard hides the chip cleanly). The response now carries `source_count`, and `retrieval.{mode, semantic_available, semantic_error, provider, model, fusion}` as the honest description of retrieval conditions. The MCP server's answer formatting reports sources consulted and retrieval mode instead of confidence.
+
+Tests: 39 passing (4 new — keyword-transcription regression incl. degraded mode, hydration relevance ranking with semantic and keyword fallback, generated-only-discovery still yielding primary evidence end-to-end through QA). Files changed in this correction: `modules/retrieval.py`, `modules/qa.py`, `mcp_server.py`, `tests/test_retrieval_index.py`, `README.md`, this addendum. No schema changes; no frontend changes.
