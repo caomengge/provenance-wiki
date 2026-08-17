@@ -150,8 +150,23 @@ Select multiple pages in the Gallery and click **Group** to combine them into on
 
 ### Search
 - **Keyword search**: SQLite FTS5 with BM25 ranking, highlights matching terms
-- **Semantic search**: vector similarity over document embeddings
+- **Semantic search**: cosine similarity over real neural embeddings (Voyage AI `voyage-4` by default) of chunk-level retrieval representations — both primary-source **transcription chunks** and **AI-generated representations** (title/description/entities/transactions/tags), fused per document with reciprocal rank fusion
+- **Hybrid mode** (`/api/search?mode=hybrid`): keyword + both semantic lists fused with reciprocal rank fusion — the same engine the Q&A assistant uses
+- If the embedding provider is unavailable, semantic/hybrid requests fall back to keyword search and say so explicitly (`semantic_available: false`); the legacy hashed bag-of-words vectors are never used
 - Filter by source archive; click an entity from the Entities page to filter results to that entity (chip with × to clear)
+
+### Retrieval index (incremental)
+Documents become searchable automatically at ingest: extraction → chunk representations (content-hashed) → embeddings for new/changed chunks → done. Embeddings are keyed by (content hash, provider, model, index schema version), so unchanged content is never re-embedded — importing 100 new documents embeds only those 100; correcting one transcription re-embeds only that document's changed chunks. Set `VOYAGE_API_KEY` in `.env` (see `.env.example`).
+
+Maintenance CLI (from `backend/`):
+
+```bash
+python scripts/reindex.py            # one-time backfill, then incremental reindex/retry
+python scripts/reindex.py --status   # index health report
+python scripts/reindex.py --no-embed # rebuild chunks/FTS only (no API calls)
+```
+
+Switching embedding models (`EMBEDDING_PROVIDER`/`EMBEDDING_MODEL`, or `--provider/--model`) adds vectors for the new model alongside the old ones and requires an explicit `reindex.py` run; vectors from different models are never mixed at query time.
 
 ### Timeline
 Chronological view of all provenance events. Filter by date range or by entity (typeahead). Every transaction event shows a coloured quality-score badge, and a **Min txn score** dropdown (0–5) lets you hide weak transactions without affecting document events. Export as PDF.
@@ -160,7 +175,7 @@ Chronological view of all provenance events. Filter by date range or by entity (
 Interactive force-directed graph showing relationships between documents, people, objects, and institutions. Click nodes to see details.
 
 ### Research Assistant (Q&A)
-Ask natural-language provenance questions. The system retrieves relevant documents and generates a grounded answer citing specific source documents.
+Ask natural-language provenance questions. The system retrieves the most relevant documents via true hybrid retrieval (keyword + semantic over transcriptions + semantic over generated representations, reciprocal-rank-fused) and builds a context grounded in the **actual retrieved transcription excerpts** — with document ID, title, source archive, date, and representation type on every context item. AI-generated descriptions are included only as clearly-labelled finding aids, never as evidence. Answers cite `[Doc #N]` / `[Group #N]` so every claim can be inspected against the underlying archival document.
 
 Example questions:
 - "Who owned this artwork before 1939?"

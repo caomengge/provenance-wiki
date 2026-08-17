@@ -1,20 +1,23 @@
 """
-embeddings.py – Configurable neural embedding backend for the experiment.
+embeddings.py – Configurable neural embedding backend (production + experiment).
 
 Interface:  backend = get_embedding_backend()
-            vectors = backend.embed(["text 1", "text 2"])
+            vectors = backend.embed(["text 1", "text 2"])                  # documents
+            q_vec   = backend.embed_one("query", input_type="query")      # queries
 
 Providers (selected via env var EMBEDDING_PROVIDER or explicit config):
 
-  sentence_transformers  (default)
+  voyage  (default)
+      Voyage AI embeddings API. Requires VOYAGE_API_KEY in .env.
+      Default model: voyage-4 (override with EMBEDDING_MODEL).
+      Uses asymmetric query/document encoding via input_type.
+      Install: pip install voyageai
+
+  sentence_transformers
       Local model via the `sentence-transformers` package.
       Default model: BAAI/bge-m3 (multilingual, handles English + Chinese).
       Override with EMBEDDING_MODEL.
       Install: pip install sentence-transformers
-
-  voyage
-      Voyage AI embeddings API. Requires VOYAGE_API_KEY.
-      Default model: voyage-3. Install: pip install voyageai
 
   openai_compatible
       Any OpenAI-compatible /v1/embeddings endpoint (OpenAI, Ollama, LM Studio,
@@ -36,10 +39,10 @@ import os
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PROVIDER = "sentence_transformers"
+DEFAULT_PROVIDER = "voyage"
 DEFAULT_MODELS = {
     "sentence_transformers": "BAAI/bge-m3",
-    "voyage": "voyage-3",
+    "voyage": "voyage-4",
     "openai_compatible": None,  # must be set explicitly
 }
 
@@ -52,11 +55,21 @@ class EmbeddingBackend:
     provider: str = "base"
     model_name: str = ""
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], input_type: str | None = None) -> list[list[float]]:
+        """
+        Embed a batch of texts. input_type is 'document' (default when None)
+        or 'query'; providers that support asymmetric encoding (Voyage) use
+        it, others ignore it.
+        """
         raise NotImplementedError
 
-    def embed_one(self, text: str) -> list[float]:
-        return self.embed([text])[0]
+    def embed_one(self, text: str, input_type: str | None = None) -> list[float]:
+        try:
+            return self.embed([text], input_type=input_type)[0]
+        except TypeError:
+            # Backwards compatibility with backends implementing embed(texts)
+            # without the input_type parameter.
+            return self.embed([text])[0]
 
 
 class SentenceTransformersBackend(EmbeddingBackend):
@@ -76,7 +89,7 @@ class SentenceTransformersBackend(EmbeddingBackend):
         except Exception as e:
             raise EmbeddingError(f"Could not load embedding model {model_name!r}: {e}") from e
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], input_type: str | None = None) -> list[list[float]]:
         if not texts:
             return []
         try:
@@ -101,11 +114,12 @@ class VoyageBackend(EmbeddingBackend):
             raise EmbeddingError("VOYAGE_API_KEY is not set")
         self._client = voyageai.Client(api_key=key)
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], input_type: str | None = None) -> list[list[float]]:
         if not texts:
             return []
         try:
-            resp = self._client.embed(texts, model=self.model_name)
+            resp = self._client.embed(texts, model=self.model_name,
+                                      input_type=input_type or "document")
             return resp.embeddings
         except Exception as e:
             raise EmbeddingError(f"Voyage embedding failed ({self.model_name}): {e}") from e
@@ -124,7 +138,7 @@ class OpenAICompatibleBackend(EmbeddingBackend):
             raise EmbeddingError("EMBEDDINGS_API_URL is not set")
         self._key = api_key or os.getenv("EMBEDDINGS_API_KEY", "")
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str], input_type: str | None = None) -> list[list[float]]:
         if not texts:
             return []
         import requests

@@ -343,6 +343,71 @@ WHEN old.updated_at = new.updated_at BEGIN
 END;
 """
 
+# ── Retrieval index schema (additive migration, 2026-08) ─────────────────────
+# Chunk-level retrieval representations + versioned embeddings for the
+# production semantic/hybrid search. Design notes:
+#   • retrieval_chunks.text is the EXACT text that gets embedded; its
+#     content_sha256 is the identity used by the incremental indexer.
+#   • retrieval_embeddings is keyed by (chunk, provider, model, schema
+#     version) so vectors from different models coexist and are never mixed
+#     at query time.
+#   • representation_type keeps primary-source transcription chunks
+#     distinct from AI-generated representations for later methodological
+#     comparison.
+#   • The legacy documents.embedding_json / document_groups.embedding_json
+#     columns (512-dim hashed bag-of-words — NOT semantic) are retained for
+#     data preservation but are no longer written or read.
+RETRIEVAL_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS retrieval_chunks (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    unit_id             INTEGER NOT NULL,
+    record_type         TEXT NOT NULL CHECK(record_type IN ('document','group')),
+    representation_type TEXT NOT NULL CHECK(representation_type IN ('transcription','generated')),
+    chunk_index         INTEGER NOT NULL,
+    chunk_count         INTEGER NOT NULL,
+    text                TEXT NOT NULL,
+    content_sha256      TEXT NOT NULL,
+    chunking_version    TEXT NOT NULL,
+    title               TEXT,
+    source_archive      TEXT,
+    date_display        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(unit_id, record_type, representation_type, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_chunks_unit
+    ON retrieval_chunks(unit_id, record_type);
+CREATE INDEX IF NOT EXISTS idx_retrieval_chunks_rep
+    ON retrieval_chunks(representation_type);
+
+CREATE TABLE IF NOT EXISTS retrieval_embeddings (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    chunk_id             INTEGER NOT NULL REFERENCES retrieval_chunks(id) ON DELETE CASCADE,
+    provider             TEXT NOT NULL,
+    model_name           TEXT NOT NULL,
+    index_schema_version INTEGER NOT NULL,
+    content_sha256       TEXT NOT NULL,
+    dim                  INTEGER,
+    embedding_json       TEXT,
+    status               TEXT NOT NULL DEFAULT 'pending'
+                         CHECK(status IN ('pending','ok','failed')),
+    error                TEXT,
+    created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(chunk_id, provider, model_name, index_schema_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_emb_lookup
+    ON retrieval_embeddings(provider, model_name, index_schema_version, status);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS retrieval_chunks_fts USING fts5(
+    text,
+    chunk_id UNINDEXED,
+    tokenize='unicode61 remove_diacritics 0'
+);
+"""
+
 
 # ── Connection management ─────────────────────────────────────────────────────
 
@@ -388,6 +453,7 @@ def init_db():
 
     with get_db() as conn:
         conn.executescript(SCHEMA_SQL)
+        conn.executescript(RETRIEVAL_SCHEMA_SQL)
         # Migrations: add columns that may not exist in older databases
         _migrate(conn, "ALTER TABLE documents ADD COLUMN is_trashed INTEGER NOT NULL DEFAULT 0")
         _migrate(conn, "ALTER TABLE documents ADD COLUMN source_archive TEXT")

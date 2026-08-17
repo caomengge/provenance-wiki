@@ -31,7 +31,7 @@ def search():
     entity_id      = request.args.get("entity_id", type=int)
     source_archive = request.args.get("source_archive") or None
 
-    if mode not in ("keyword", "semantic"):
+    if mode not in ("keyword", "semantic", "hybrid"):
         mode = "keyword"
 
     result = search_documents(
@@ -146,6 +146,9 @@ def add_doc_tag(doc_id):
         except Exception as exc:
             return jsonify({"error": str(exc)}), 400
 
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
+
     return jsonify({"ok": True, "tag_id": tag_id}), 201
 
 
@@ -160,5 +163,8 @@ def remove_doc_tag(doc_id, tag_id):
         )
         if cur.rowcount == 0:
             abort(404)
+
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
 
     return jsonify({"ok": True})

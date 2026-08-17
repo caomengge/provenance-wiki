@@ -294,11 +294,18 @@ def main():
             question = arguments.get("question", "")
             result   = answer_question(question, ANTHROPIC_API_KEY)
 
+            def _src_label(s):
+                # sources are {"id":…, "record_type": "document"|"group"}
+                if isinstance(s, dict):
+                    prefix = "Group " if s.get("record_type") == "group" else ""
+                    return f"{prefix}#{s.get('id')}"
+                return f"#{s}"
+
             lines = [
                 result["answer"],
                 "",
                 f"**Confidence:** {result.get('confidence','?')}",
-                f"**Source documents:** {', '.join(f'#{i}' for i in result.get('sources', []))}",
+                f"**Source documents:** {', '.join(_src_label(s) for s in result.get('sources', []))}",
             ]
             return [types.TextContent(type="text", text="\n".join(lines))]
 

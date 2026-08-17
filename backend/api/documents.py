@@ -289,6 +289,13 @@ def update_document(doc_id):
         record_audit_diff(conn, entity_type="document", entity_id=doc_id,
                           old_row=dict(old_row), new_values=updates)
 
+    # Incremental retrieval reindex: only chunks whose content actually
+    # changed are re-embedded (e.g. a corrected transcription re-embeds only
+    # that document's transcription chunks; a title edit only refreshes
+    # metadata / the generated representation).
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
+
     return jsonify({"ok": True, "updated": list(updates.keys())})
 
 
@@ -377,6 +384,10 @@ def delete_document(doc_id):
     from modules.thumbnails import delete_thumbnail
     delete_thumbnail(sha256)
 
+    # Remove the document's retrieval records (chunks, FTS, embeddings).
+    from modules.indexer import remove_unit_safe
+    remove_unit_safe(doc_id, "document")
+
     return jsonify({"ok": True, "deleted": doc_id})
 
 
@@ -421,6 +432,9 @@ def add_document_entity(doc_id):
             record_audit(conn, entity_type="document", entity_id=doc_id, action="add_entity",
                          new={"entity_id": entity_id, "name": entity["name"], "role": role})
 
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
+
     return jsonify({"ok": True, "entity": row_to_dict(entity), "role": role}), 201
 
 
@@ -445,6 +459,9 @@ def remove_document_entity(doc_id, entity_id):
                AND id NOT IN (SELECT entity_id FROM group_entities)""",
             (entity_id,),
         )
+
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
 
     return jsonify({"ok": True})
 
@@ -530,6 +547,9 @@ def wipe_document_metadata(doc_id):
         )
         conn.execute("DELETE FROM document_entities WHERE document_id = ?", (doc_id,))
         conn.execute("DELETE FROM transactions       WHERE document_id = ?", (doc_id,))
+
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
 
     return jsonify({"ok": True})
 

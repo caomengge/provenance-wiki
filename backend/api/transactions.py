@@ -67,6 +67,10 @@ def create_doc_transaction(doc_id):
              data.get("lot_number"), data.get("location"), data.get("notes")),
         )
         row = conn.execute("SELECT * FROM transactions WHERE id=?", (cur.lastrowid,)).fetchone()
+
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
+
     return jsonify(enrich(row)), 201
 
 
@@ -82,15 +86,26 @@ def update_doc_transaction(txn_id):
         row = conn.execute("SELECT * FROM transactions WHERE id=?", (txn_id,)).fetchone()
     if not row:
         abort(404)
+
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(row["document_id"])
+
     return jsonify(enrich(row))
 
 
 @bp.delete("/api/transactions/<int:txn_id>")
 def delete_doc_transaction(txn_id):
     with get_db() as conn:
+        doc_row = conn.execute(
+            "SELECT document_id FROM transactions WHERE id=?", (txn_id,)).fetchone()
         cur = conn.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
     if cur.rowcount == 0:
         abort(404)
+
+    from modules.indexer import reindex_document_safe
+    if doc_row:
+        reindex_document_safe(doc_row["document_id"])
+
     return jsonify({"ok": True})
 
 
@@ -112,6 +127,10 @@ def create_group_transaction(group_id):
              data.get("lot_number"), data.get("location"), data.get("notes")),
         )
         row = conn.execute("SELECT * FROM group_transactions WHERE id=?", (cur.lastrowid,)).fetchone()
+
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify(enrich(row)), 201
 
 
@@ -127,13 +146,24 @@ def update_group_transaction(txn_id):
         row = conn.execute("SELECT * FROM group_transactions WHERE id=?", (txn_id,)).fetchone()
     if not row:
         abort(404)
+
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(row["group_id"], "group")
+
     return jsonify(enrich(row))
 
 
 @bp.delete("/api/group_transactions/<int:txn_id>")
 def delete_group_transaction(txn_id):
     with get_db() as conn:
+        grp_row = conn.execute(
+            "SELECT group_id FROM group_transactions WHERE id=?", (txn_id,)).fetchone()
         cur = conn.execute("DELETE FROM group_transactions WHERE id=?", (txn_id,))
     if cur.rowcount == 0:
         abort(404)
+
+    from modules.indexer import reindex_unit_safe
+    if grp_row:
+        reindex_unit_safe(grp_row["group_id"], "group")
+
     return jsonify({"ok": True})
