@@ -294,11 +294,27 @@ def main():
             question = arguments.get("question", "")
             result   = answer_question(question, ANTHROPIC_API_KEY)
 
+            def _src_label(s):
+                # sources are {"id":…, "record_type": "document"|"group"}
+                if isinstance(s, dict):
+                    prefix = "Group " if s.get("record_type") == "group" else ""
+                    return f"{prefix}#{s.get('id')}"
+                return f"#{s}"
+
+            meta = result.get("retrieval") or {}
+            retrieved = result.get("retrieved_source_count",
+                                   len(result.get("sources", [])))
+            cited = result.get("cited_source_count",
+                               len(result.get("citations", [])))
             lines = [
                 result["answer"],
                 "",
-                f"**Confidence:** {result.get('confidence','?')}",
-                f"**Source documents:** {', '.join(f'#{i}' for i in result.get('sources', []))}",
+                f"**Sources:** {retrieved} retrieved, {cited} cited in the answer "
+                f"({', '.join(_src_label(s) for s in result.get('sources', []))})",
+                f"**Retrieval:** {meta.get('mode', '?')}"
+                + (f" — {meta.get('provider')}/{meta.get('model')}" if meta.get("provider") else "")
+                + ("" if meta.get("semantic_available", True)
+                   else " (semantic unavailable — keyword only)"),
             ]
             return [types.TextContent(type="text", text="\n".join(lines))]
 

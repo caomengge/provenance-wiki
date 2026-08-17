@@ -333,6 +333,11 @@ def update_entity(entity_id):
             (new_name, norm, new_type, entity_id)
         )
 
+    # The entity name/type appears in the generated representation of every
+    # linked unit — incrementally re-embed just those generated chunks.
+    from modules.indexer import reindex_entity_units_safe
+    reindex_entity_units_safe(entity_id)
+
     return jsonify({"ok": True})
 
 
@@ -345,8 +350,21 @@ def delete_entity(entity_id):
     with get_db() as conn:
         if not conn.execute("SELECT 1 FROM entities WHERE id=?", (entity_id,)).fetchone():
             abort(404)
+        affected = [(r["document_id"], "document") for r in conn.execute(
+            "SELECT DISTINCT document_id FROM document_entities WHERE entity_id=?",
+            (entity_id,)).fetchall()]
+        affected += [(r["group_id"], "group") for r in conn.execute(
+            "SELECT DISTINCT group_id FROM group_entities WHERE entity_id=?",
+            (entity_id,)).fetchall()]
         conn.execute("DELETE FROM document_entities WHERE entity_id=?", (entity_id,))
         conn.execute("DELETE FROM entities WHERE id=?", (entity_id,))
+
+    from modules.indexer import reindex_unit_safe, reindex_document_safe
+    for uid, rt in sorted(set(affected)):
+        if rt == "document":
+            reindex_document_safe(uid)
+        else:
+            reindex_unit_safe(uid, "group")
 
     return jsonify({"ok": True})
 
@@ -417,6 +435,11 @@ def merge_entities():
         )
 
         conn.execute("DELETE FROM entities WHERE id=?", (discard_id,))
+
+    # Every unit that now references the surviving entity has a changed
+    # generated representation (name swap) — reindex those incrementally.
+    from modules.indexer import reindex_entity_units_safe
+    reindex_entity_units_safe(keep_id)
 
     return jsonify({"ok": True, "merged_into": keep_id})
 

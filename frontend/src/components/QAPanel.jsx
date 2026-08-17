@@ -12,6 +12,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import DocPreviewPanel from './DocPreviewPanel'
 
@@ -37,6 +38,23 @@ export default function QAPanel({ isOpen, onClose }) {
   const [panelDocId, setPanelDocId] = useState(null)
   const bottomRef = useRef(null)
   const inputRef  = useRef(null)
+  const navigate  = useNavigate()
+
+  // Citations carry record_type ('document' | 'group'). Document IDs and
+  // group IDs are SEPARATE sequences, so a group citation must never be
+  // opened as a document (that showed an unrelated or missing record) —
+  // it navigates to the multi-page group page and closes this panel.
+  const citationLabel = c =>
+    `${c.record_type === 'group' ? 'Group' : 'Doc'} #${c.doc_id}`
+
+  const openCitation = c => {
+    if (c.record_type === 'group') {
+      navigate(`/groups/${c.doc_id}`)
+      onClose()
+    } else {
+      setPanelDocId(c.doc_id)
+    }
+  }
 
   // Focus the input whenever the panel opens
   useEffect(() => {
@@ -306,8 +324,8 @@ export default function QAPanel({ isOpen, onClose }) {
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
                               {entry.citations.map(c => (
                                 <button
-                                  key={c.doc_id}
-                                  onClick={() => setPanelDocId(c.doc_id)}
+                                  key={`${c.record_type || 'document'}-${c.doc_id}`}
+                                  onClick={() => openCitation(c)}
                                   style={{
                                     background:   'var(--cream-bg)',
                                     border:       '1px solid var(--border)',
@@ -319,7 +337,7 @@ export default function QAPanel({ isOpen, onClose }) {
                                     fontFamily:   'inherit',
                                   }}
                                 >
-                                  Doc #{c.doc_id}: {c.title?.substring(0, 25)}{c.title?.length > 25 ? '…' : ''}
+                                  {citationLabel(c)}: {c.title?.substring(0, 25)}{c.title?.length > 25 ? '…' : ''}
                                 </button>
                               ))}
                             </div>

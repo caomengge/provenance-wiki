@@ -1,0 +1,7 @@
+query_id,query,query_type,notes
+Q1,Zhihua Temple ceiling purchase,factual,Direct object query about the coffered ceiling acquisition
+Q2,Who helped Laurence Sickman acquire objects in Beijing?,relational,Names of intermediaries and dealers
+Q3,What was Laurence Sickman's attitude toward the ethics of purchasing the ceiling from Zhihua Temple?,interpretive,Archive likely never uses the word "ethics"; tests interpretive discovery
+Q4,anonymity or secrecy around acquisitions,interpretive,Protecting collaborators' identities as indirect evidence of moral awareness
+Q5,shipping and export of artworks from China,factual,Logistics correspondence across archives
+Q6,disagreements between Sickman and museum administration,relational,Cross-archive institutional friction

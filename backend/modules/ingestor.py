@@ -83,7 +83,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
     global _is_ingesting
     from config import SUPPORTED_EXTS, INGEST_WORKERS
     from modules.db import get_db, document_exists_by_sha256, upsert_entity, get_or_create_tag
-    from modules.extractor import extract_from_image, generate_text_embedding
+    from modules.extractor import extract_from_image
     from modules.thumbnails import ensure_thumbnail
 
     run_id = _create_run(source_archive)
@@ -155,7 +155,7 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
             try:
                 doc_id = _process_single(photo_path, sha, api_key, get_db,
                                 upsert_entity, get_or_create_tag,
-                                extract_from_image, generate_text_embedding,
+                                extract_from_image,
                                 source_archive=source_archive,
                                 existing_id=existing_id)
                 ensure_thumbnail(photo_path, sha)
@@ -212,18 +212,16 @@ def _ingest_worker(photos_dir: Path, api_key: str, batch_size: int, source_archi
 
 
 def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
-                    get_or_create_tag, extract_from_image, generate_text_embedding,
+                    get_or_create_tag, extract_from_image,
                     source_archive: str = None, existing_id: int = None):
-    """Extract data from one photo and write everything to the database."""
+    """
+    Extract data from one photo and write everything to the database, then
+    incrementally index the new/updated document for retrieval (chunk
+    representations + FTS + semantic embeddings). Indexing failures never
+    destroy the ingested data: chunks/FTS are committed first and embedding
+    problems are recorded as pending/failed for retry.
+    """
     data = extract_from_image(photo_path, api_key)
-
-    # Build embedding from title + description
-    embed_text = " ".join(filter(None, [
-        data.get("title", ""),
-        data.get("description", ""),
-        " ".join(data.get("tags", [])),
-    ]))
-    embedding = generate_text_embedding(embed_text, api_key)
 
     # Trust the LLM's category if it lands on a known canonical value, but
     # always fall back to the substring mapper so junk/typos still resolve.
@@ -250,7 +248,6 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     language            = ?,
                     raw_claude_response = ?,
                     transcription       = ?,
-                    embedding_json      = ?,
                     source_archive      = COALESCE(source_archive, ?),
                     updated_at          = datetime('now')
                    WHERE id = ?""",
@@ -267,7 +264,6 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     data.get("language"),
                     json.dumps(data),
                     data.get("transcription"),
-                    json.dumps(embedding) if embedding else None,
                     source_archive or None,
                     existing_id,
                 )
@@ -279,8 +275,8 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                 """INSERT OR IGNORE INTO documents
                    (filename, sha256, title, date_depicted, date_range_start, date_range_end,
                     location, medium, medium_category, dimensions, description, language,
-                    raw_claude_response, transcription, is_key_evidence, embedding_json, source_archive)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    raw_claude_response, transcription, is_key_evidence, source_archive)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     photo_path.name,
                     sha,
@@ -297,7 +293,6 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     json.dumps(data),
                     data.get("transcription"),
                     0,  # is_key_evidence — never set automatically; user flags manually
-                    json.dumps(embedding) if embedding else None,
                     source_archive or None,
                 ),
             )
@@ -351,6 +346,13 @@ def _process_single(photo_path, sha, api_key, get_db, upsert_entity,
                     "INSERT OR IGNORE INTO document_tags (document_id, tag_id) VALUES (?,?)",
                     (doc_id, tag_id),
                 )
+
+    # Automatic retrieval indexing: chunk representations + FTS + embeddings
+    # for this document only (incremental — nothing else is touched). Runs
+    # after the content transaction committed, so an indexing/embedding
+    # failure can never destroy the ingested data.
+    from modules.indexer import reindex_document_safe
+    reindex_document_safe(doc_id)
 
     return doc_id
 

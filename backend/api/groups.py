@@ -43,7 +43,7 @@ def create_group():
     trigger this later via the per-group "Re-extract" button.
     """
     PHOTOS_DIR, API_KEY, _, _, MULTIPAGE_MAX_PAGES, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag = _get_deps()
-    from modules.extractor import extract_from_images, generate_text_embedding, synthesize_group_text
+    from modules.extractor import extract_from_images, synthesize_group_text
     from modules.group_merge import merge_pages_data
 
     data       = request.get_json(silent=True) or {}
@@ -95,13 +95,6 @@ def create_group():
             extracted["title"]       = synth["title"]
             extracted["description"] = synth["description"]
 
-    embed_text = " ".join(filter(None, [
-        extracted.get("title", ""),
-        extracted.get("description", ""),
-        " ".join(extracted.get("tags", [])),
-    ]))
-    embedding = generate_text_embedding(embed_text, API_KEY)
-
     from modules.medium_taxonomy import categorize, CATEGORIES
     raw_medium      = extracted.get("medium")
     llm_category    = (extracted.get("medium_category") or "").strip().lower()
@@ -114,8 +107,8 @@ def create_group():
                (title, date_depicted, date_range_start, date_range_end,
                 location, medium, medium_category, dimensions, description, language,
                 transcription, raw_claude_response, is_key_evidence,
-                embedding_json, source_archive)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                source_archive)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 title or extracted.get("title"),
                 _normalize_date(extracted.get("date_depicted")),
@@ -130,7 +123,6 @@ def create_group():
                 extracted.get("transcription"),
                 json.dumps(extracted),
                 0,  # is_key_evidence — never set automatically; user flags manually
-                json.dumps(embedding) if embedding else None,
                 inherited_source_archive,
             )
         )
@@ -190,6 +182,13 @@ def create_group():
                     "INSERT OR IGNORE INTO group_tags (group_id, tag_id) VALUES (?,?)",
                     (group_id, tag_id)
                 )
+
+    # Retrieval index: the pages are no longer standalone retrieval units —
+    # the group replaces them (incremental; only this group is embedded).
+    from modules.indexer import remove_unit_safe, reindex_unit_safe
+    for doc_id in sorted_ids:
+        remove_unit_safe(doc_id, "document")
+    reindex_unit_safe(group_id, "group")
 
     return jsonify({"group_id": group_id, "title": title or extracted.get("title")}), 201
 
@@ -420,6 +419,14 @@ def update_group(group_id):
         record_audit_diff(conn, entity_type="group", entity_id=group_id,
                           old_row=dict(old_row), new_values=updates)
 
+    # Incremental retrieval reindex (only chunks whose content changed are
+    # re-embedded; trashing removes the unit from the index).
+    from modules.indexer import reindex_unit_safe, remove_unit_safe
+    if updates.get("is_trashed"):
+        remove_unit_safe(group_id, "group")
+    else:
+        reindex_unit_safe(group_id, "group")
+
     return jsonify({"ok": True, "updated": list(updates.keys())})
 
 
@@ -433,6 +440,8 @@ def delete_group(group_id):
         g = conn.execute("SELECT title FROM document_groups WHERE id=?", (group_id,)).fetchone()
         if not g:
             abort(404)
+        freed_page_ids = [r["id"] for r in conn.execute(
+            "SELECT id FROM documents WHERE group_id=?", (group_id,)).fetchall()]
         from modules.db import record_audit
         record_audit(conn, entity_type="group", entity_id=group_id, action="delete",
                      old={"title": g["title"]})
@@ -452,6 +461,13 @@ def delete_group(group_id):
             WHERE id NOT IN (SELECT tag_id FROM document_tags)
               AND id NOT IN (SELECT tag_id FROM group_tags)
         """)
+
+    # Retrieval index: the group unit disappears; its pages become
+    # standalone retrieval units again (incremental).
+    from modules.indexer import remove_unit_safe, reindex_document_safe
+    remove_unit_safe(group_id, "group")
+    for doc_id in freed_page_ids:
+        reindex_document_safe(doc_id)
 
     return jsonify({"ok": True, "deleted": group_id})
 
@@ -494,6 +510,9 @@ def add_group_entity(group_id):
             record_audit(conn, entity_type="group", entity_id=group_id, action="add_entity",
                          new={"entity_id": entity_id, "name": entity["name"], "role": role})
 
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify({"ok": True, "entity": row_to_dict(entity), "role": role}), 201
 
 
@@ -519,6 +538,9 @@ def remove_group_entity(group_id, entity_id):
             (entity_id,),
         )
 
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify({"ok": True})
 
 
@@ -543,6 +565,10 @@ def reorder_pages(group_id):
                 (page_number, doc_id, group_id)
             )
 
+    # Page order changes the group's concatenated transcription.
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify({"ok": True})
 
 
@@ -551,7 +577,7 @@ def reorder_pages(group_id):
 @bp.route("/api/groups/<int:group_id>/re-extract", methods=["POST"])
 def re_extract_group(group_id):
     PHOTOS_DIR, API_KEY, _, _, _, get_db, rows_to_list, row_to_dict, upsert_entity, get_or_create_tag = _get_deps()
-    from modules.extractor import extract_from_images, generate_text_embedding
+    from modules.extractor import extract_from_images
 
     with get_db() as conn:
         if not conn.execute("SELECT 1 FROM document_groups WHERE id=?", (group_id,)).fetchone():
@@ -570,12 +596,6 @@ def re_extract_group(group_id):
         return jsonify({"error": f"Image files not found: {missing}"}), 404
 
     extracted = extract_from_images(image_paths, API_KEY)
-    embed_text = " ".join(filter(None, [
-        extracted.get("title", ""),
-        extracted.get("description", ""),
-        " ".join(extracted.get("tags", [])),
-    ]))
-    embedding = generate_text_embedding(embed_text, API_KEY)
 
     from modules.medium_taxonomy import categorize, CATEGORIES
     raw_medium      = extracted.get("medium")
@@ -589,7 +609,7 @@ def re_extract_group(group_id):
                 title=?, date_depicted=?, date_range_start=?, date_range_end=?,
                 location=?, medium=?, medium_category=?, dimensions=?, description=?, language=?,
                 transcription=?, raw_claude_response=?,
-                embedding_json=?, updated_at=datetime('now')
+                updated_at=datetime('now')
                WHERE id=?""",
             (
                 extracted.get("title"),
@@ -598,7 +618,6 @@ def re_extract_group(group_id):
                 raw_medium, medium_category, extracted.get("dimensions"),
                 extracted.get("description"), extracted.get("language"),
                 extracted.get("transcription"), json.dumps(extracted),
-                json.dumps(embedding) if embedding else None,
                 group_id,
             )
         )
@@ -644,6 +663,9 @@ def re_extract_group(group_id):
                     (group_id, tag_id)
                 )
 
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify({"ok": True})
 
 
@@ -669,6 +691,9 @@ def add_group_tag(group_id):
         )
         tag = conn.execute("SELECT id, name, color FROM tags WHERE id=?", (tag_id,)).fetchone()
 
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
+
     return jsonify(dict(tag)), 201
 
 
@@ -683,6 +708,9 @@ def remove_group_tag(group_id, tag_id):
             "DELETE FROM group_tags WHERE group_id=? AND tag_id=?",
             (group_id, tag_id)
         )
+
+    from modules.indexer import reindex_unit_safe
+    reindex_unit_safe(group_id, "group")
 
     return jsonify({"ok": True})
 

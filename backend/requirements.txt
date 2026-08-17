@@ -7,3 +7,4 @@ pillow>=10.0.0
 numpy>=1.26.0
 mcp>=1.0.0
 gunicorn>=21.2.0
+voyageai>=0.3.0

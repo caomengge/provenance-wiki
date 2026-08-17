@@ -1,0 +1,23 @@
+Provenance Wiki Pilot Evaluation Corpus
+
+Snapshot date: 2026-08-17
+Branch: experiment/retrieval-modes
+Commit: eeae9e44724dcc3ba5faea25a7fe5527e055315c
+Experiment configuration: chunked_retrieval_v1
+
+Retrieval units: 399
+Transcription chunks: 1153
+Generated-representation chunks: 512
+Total chunks: 1665
+
+Embedding provider: Voyage
+Embedding model: voyage-4
+Index schema version: 1
+
+Semantic ready: true
+Pending embeddings: 0
+Failed embeddings: 0
+
+Notes:
+Documents #170 and #171 contain photographs and therefore intentionally
+have generated representations but no transcription.

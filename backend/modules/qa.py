@@ -2,18 +2,39 @@
 qa.py – Retrieval-Augmented Generation Q&A engine.
 
 Pipeline:
-  1. Parse the question to extract named entities and date hints.
-  2. Retrieve the top-15 most relevant documents via hybrid search
-     (FTS5 keyword + optional embedding re-rank).
-  3. Pull any matching transactions from those documents.
-  4. Assemble a grounded context block and send to Claude claude-sonnet-4-6.
-  5. Return {answer, sources: [document_ids], confidence, citations}.
-
-The system prompt instructs Claude to cite source documents and refuse to
-speculate beyond the evidence.
+  1. Retrieve the most relevant retrieval units via TRUE hybrid retrieval
+     (modules/retrieval.py): BM25 keyword over transcriptions +
+     semantic-over-transcription + semantic-over-generated, fused with
+     reciprocal rank fusion. If the embedding provider is unavailable,
+     retrieval degrades to keyword-only and the response says so — never a
+     silent substitution.
+  2. EVIDENCE HYDRATION (retrieval.hydrate_evidence): for every selected
+     unit that has transcription, fetch the most query-relevant
+     transcription chunks from within that unit — even when the unit was
+     discovered only through its AI-generated representation. Discovery
+     and evidence are kept distinct: `discovery_matches` records why a
+     unit was retrieved; `evidence_chunks` are the primary-source passages
+     supplied for historical interpretation.
+  3. Build a grounded context whose PRIMARY-SOURCE EVIDENCE is those
+     hydrated transcription passages. Each context item preserves:
+     document/group ID, title, source archive, date, excerpt, and
+     representation type. AI-generated descriptions supplement the
+     evidence but are explicitly labelled machine-generated finding aids
+     and never replace transcription text; a unit with no transcription is
+     flagged so no substantive historical claim rests on generated
+     metadata alone.
+  4. Pull matching transactions for the retrieved units.
+  5. Send to Claude with a system prompt that requires citation of
+     [Doc #N] / [Group #N] and forbids speculation beyond the evidence.
+  6. Return {answer, sources, retrieved_source_count, cited_source_count,
+     source_count (= cited), citations, context_items,
+     retrieval} so the underlying documents can be inspected directly and
+     the frontend can later show both "why this document was found" and
+     "passage used as evidence". The legacy `confidence` field is
+     DEPRECATED (always null): citation count is not a valid measure of
+     evidentiary confidence.
 """
 
-import json
 import logging
 import re
 from typing import Any
@@ -26,24 +47,109 @@ QA_SYSTEM_PROMPT = """You are a meticulous museum provenance researcher. Your ro
 
 Rules:
 1. Base every claim on the provided source documents. Never speculate or add information from outside the provided context.
-2. When you cite a fact, always note the document ID(s) that support it (format: [Doc #N]).
-3. If the answer is not in the provided documents, say so clearly: "The available documents do not contain information about this."
-4. For ownership chains, present them chronologically.
-5. Note any gaps or uncertainties in the provenance record.
-6. Preserve non-English names and terms exactly as they appear in the source documents.
-7. Be concise but thorough. Prefer bullet points for ownership chains."""
+2. The evidentiary basis of your answer is the text under "PRIMARY-SOURCE EVIDENCE" — the transcribed archival documents themselves. Machine-generated descriptions, machine-extracted entities, and machine-extracted transactions were produced by an AI at ingest time; treat all of them as finding aids / organizational metadata, never as primary historical evidence.
+3. When you cite a fact, always note the document ID(s) that support it (format: [Doc #N] for documents, [Group #N] for multi-page groups). Cite only documents provided in the context.
+4. Never make a substantive historical claim that rests solely on a machine-extracted transaction unless it is corroborated by the supplied PRIMARY-SOURCE EVIDENCE. Transactions may help organize chronology or identify leads, but describe any transaction field unsupported by the primary-source transcriptions as unverified rather than asserting it as fact.
+5. If the answer is not in the provided documents, say so clearly: "The available documents do not contain information about this."
+6. For ownership chains, present them chronologically.
+7. Note any gaps or uncertainties in the provenance record, and mention the source archive a document comes from when it matters.
+8. A document marked as having no PRIMARY-SOURCE EVIDENCE carries only machine-generated metadata. You may mention it as a lead worth consulting, but never make a substantive historical claim that rests solely on its machine-generated metadata.
+9. Preserve non-English names and terms exactly as they appear in the source documents.
+10. Be concise but thorough. Prefer bullet points for ownership chains."""
 
 QA_CONTEXT_TEMPLATE = """PROVENANCE DOCUMENTS FOR CONTEXT
 =================================
 {doc_blocks}
 
-RELATED TRANSACTIONS
-====================
+RELATED TRANSACTIONS (machine-extracted — finding aid / organizational metadata, NOT primary evidence; verify against PRIMARY-SOURCE EVIDENCE before asserting)
+========================================
 {txn_blocks}
 
 =================================
 Based ONLY on the above documents, answer the following question:
 {question}"""
+
+# Cap on transcription text per context block, so ~15 excerpts stay well
+# within the model context while remaining substantial evidence.
+MAX_EXCERPT_CHARS = 4000
+
+
+def _context_block(conn, unit: dict) -> str:
+    """
+    One context block for a retrieved unit. The HYDRATED transcription
+    passages (evidence_chunks — the most query-relevant passages from
+    within this unit, regardless of how the unit was discovered) are the
+    primary evidence; generated metadata is a labelled finding aid.
+    """
+    label = "Doc" if unit["record_type"] == "document" else "Group"
+    lines = [f"[{label} #{unit['unit_id']}] {unit.get('title') or 'Untitled'}"]
+    lines.append(f"Source archive: {unit.get('source_archive') or 'Unknown'}")
+    lines.append(f"Date: {unit.get('date_display') or 'Unknown'}")
+
+    # Primary evidence: hydrated transcription passages, in document order.
+    evidence = sorted(unit.get("evidence_chunks") or [],
+                      key=lambda c: c["chunk_index"])
+    excerpt = "\n[…]\n".join(c["text"] for c in evidence)
+    if excerpt:
+        if len(excerpt) > MAX_EXCERPT_CHARS:
+            excerpt = excerpt[:MAX_EXCERPT_CHARS] + "\n[…excerpt truncated…]"
+        lines.append("PRIMARY-SOURCE EVIDENCE (transcription passages most "
+                     "relevant to the question):")
+        lines.append(excerpt)
+    else:
+        lines.append("PRIMARY-SOURCE EVIDENCE: none — no transcription available "
+                     "for this record. Only machine-generated metadata exists; "
+                     "treat this record as a finding aid, not as evidence.")
+
+    # Supplementary, clearly labelled machine-generated description.
+    table = "documents" if unit["record_type"] == "document" else "document_groups"
+    row = conn.execute(f"SELECT description, annotation FROM {table} WHERE id=?",
+                       (unit["unit_id"],)).fetchone()
+    if row and row["description"]:
+        lines.append(f"Machine-generated description (finding aid, not evidence): "
+                     f"{row['description']}")
+    if row and row["annotation"]:
+        lines.append(f"Researcher note: {row['annotation']}")
+
+    return "\n".join(lines)
+
+
+def _context_item_meta(unit: dict) -> dict:
+    """
+    Serialisable discovery/evidence metadata for one context unit, so the
+    frontend can later show "why this document was found" alongside
+    "passage used as evidence".
+    """
+    discovery = [{
+        "list": c["list"],
+        "rank": c["rank"],
+        "score": c["score"],
+        "representation_type": c["representation_type"],
+        "chunk_index": c["chunk_index"],
+        "snippet": (c["text"] or "")[:300],
+    } for c in unit.get("discovery_matches", [])]
+    return {
+        "id": unit["unit_id"],
+        "record_type": unit["record_type"],
+        "title": unit.get("title"),
+        "source_archive": unit.get("source_archive"),
+        "date": unit.get("date_display"),
+        "fused_rank": unit.get("fused_rank"),
+        "fused_score": unit.get("fused_score"),
+        "keyword_rank": unit.get("keyword_rank"),
+        "semantic_transcription_rank": unit.get("semantic_transcription_rank"),
+        "semantic_generated_rank": unit.get("semantic_generated_rank"),
+        "has_transcription": unit.get("has_transcription", False),
+        "discovery_matches": discovery,
+        "evidence_chunks": [{
+            "chunk_id": c["chunk_id"],
+            "chunk_index": c["chunk_index"],
+            "chunk_count": c["chunk_count"],
+            "method": c["method"],
+            "score": c["score"],
+            "text": c["text"],
+        } for c in unit.get("evidence_chunks", [])],
+    }
 
 
 def answer_question(question: str, api_key: str) -> dict[str, Any]:
@@ -52,132 +158,101 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
 
     Returns:
         {
-            answer:     str,
-            sources:    [document_ids],
-            confidence: 'high' | 'medium' | 'low' | 'none',
-            citations:  [{doc_id, title, snippet}],
+            answer:        str,
+            sources:       [{id, record_type}],
+            retrieved_source_count: int — retrieval units supplied to RAG,
+            cited_source_count:     int — valid [Doc #N]/[Group #N]
+                                    citations parsed from the answer,
+            source_count:  int — alias of cited_source_count (kept for
+                           compatibility; it previously meant retrieved
+                           candidates, now it means actually cited sources),
+            confidence:    None (DEPRECATED — kept for frontend
+                           compatibility only; citation count is not a
+                           valid measure of evidentiary confidence),
+            citations:     [{doc_id, record_type, title, source_archive,
+                             snippet}],
+            context_items: [{id, record_type, ..., discovery_matches,
+                             evidence_chunks, has_transcription}],
+            retrieval:     {mode, semantic_available, semantic_error,
+                            fusion, provider, model},
         }
     """
-    from modules.search import search_documents
     from modules.db import get_db
+    from modules.retrieval import hybrid_retrieve, hydrate_evidence
     from config import QA_CONTEXT_DOCS, QA_MAX_TOKENS
 
-    # 1. Retrieve relevant documents via keyword search
-    results = search_documents(question, mode="keyword", page=1, per_page=QA_CONTEXT_DOCS)
-    docs = results.get("results", [])
+    with get_db() as conn:
+        retrieval = hybrid_retrieve(conn, question, top_k=QA_CONTEXT_DOCS)
+        units = retrieval["results"]
 
-    if not docs:
-        # Try semantic as fallback
-        results = search_documents(question, mode="semantic", page=1, per_page=QA_CONTEXT_DOCS)
-        docs = results.get("results", [])
-
-    if not docs:
-        return {
-            "answer":     "No relevant documents were found in the archive for this question.",
-            "sources":    [],
-            "confidence": "none",
-            "citations":  [],
+        retrieval_meta = {
+            "mode": "hybrid" if retrieval["semantic_available"] else "keyword_only",
+            "semantic_available": retrieval["semantic_available"],
+            "semantic_error": retrieval["semantic_error"],
+            "fusion": retrieval["fusion"],
+            "provider": retrieval.get("provider"),
+            "model": retrieval.get("model"),
         }
 
-    # Separate standalone docs from group results
-    solo_docs  = [d for d in docs if d.get("record_type") != "group"]
-    group_hits = [d for d in docs if d.get("record_type") == "group"]
+        if not units:
+            return {
+                "answer":       "No relevant documents were found in the archive for this question.",
+                "sources":      [],
+                "retrieved_source_count": 0,
+                "cited_source_count":     0,
+                "source_count": 0,
+                "confidence":   None,   # DEPRECATED
+                "citations":    [],
+                "context_items": [],
+                "retrieval":    retrieval_meta,
+            }
 
-    doc_ids   = [d["id"] for d in solo_docs]
-    group_ids = [g["id"] for g in group_hits]
+        # Evidence hydration: attach the most query-relevant transcription
+        # passages from within each selected unit (reusing the query
+        # embedding when semantic retrieval ran; keyword fallback otherwise).
+        hydrate_evidence(conn, question, units,
+                         query_vec=retrieval.get("_query_vec"))
 
-    # 2. Pull transactions and full details
-    with get_db() as conn:
-        txn_blocks_raw = []
+        doc_ids   = [u["unit_id"] for u in units if u["record_type"] == "document"]
+        group_ids = [u["unit_id"] for u in units if u["record_type"] == "group"]
 
+        # Context blocks grounded in the hydrated transcription passages.
+        doc_blocks = [_context_block(conn, u) for u in units]
+
+        # Matching transactions for the retrieved units.
+        txn_rows = []
         if doc_ids:
-            placeholders = ",".join("?" * len(doc_ids))
-            txns = conn.execute(
-                f"""SELECT t.*, d.title as doc_title
-                    FROM transactions t
-                    JOIN documents d ON d.id = t.document_id
-                    WHERE t.document_id IN ({placeholders})
-                    ORDER BY t.date""",
-                doc_ids,
-            ).fetchall()
-            txn_blocks_raw.extend(txns)
-
-            full_docs = conn.execute(
-                f"SELECT * FROM documents WHERE id IN ({placeholders})",
-                doc_ids,
-            ).fetchall()
-            full_docs_map = {d["id"]: dict(d) for d in full_docs}
-        else:
-            full_docs_map = {}
-
+            ph = ",".join("?" * len(doc_ids))
+            txn_rows += [("Doc", dict(t)) for t in conn.execute(
+                f"""SELECT * FROM transactions
+                    WHERE document_id IN ({ph}) ORDER BY date""", doc_ids)]
         if group_ids:
-            gplaceholders = ",".join("?" * len(group_ids))
-            group_txns = conn.execute(
-                f"""SELECT gt.*, g.title as doc_title, gt.group_id as document_id
-                    FROM group_transactions gt
-                    JOIN document_groups g ON g.id = gt.group_id
-                    WHERE gt.group_id IN ({gplaceholders})
-                    ORDER BY gt.date""",
-                group_ids,
-            ).fetchall()
-            txn_blocks_raw.extend(group_txns)
-
-            full_groups = conn.execute(
-                f"SELECT * FROM document_groups WHERE id IN ({gplaceholders})",
-                group_ids,
-            ).fetchall()
-            full_groups_map = {g["id"]: dict(g) for g in full_groups}
-        else:
-            full_groups_map = {}
-
-    # 3. Build context blocks
-    doc_blocks = []
-    for doc in solo_docs:
-        full = full_docs_map.get(doc["id"], doc)
-        block_lines = [
-            f"[Doc #{doc['id']}] {full.get('title', 'Untitled')}",
-            f"Date: {full.get('date_depicted') or full.get('date_range_start') or 'Unknown'}",
-            f"Location: {full.get('location') or 'Unknown'}",
-            f"Description: {full.get('description') or ''}",
-        ]
-        if full.get("annotation"):
-            block_lines.append(f"Researcher note: {full['annotation']}")
-        doc_blocks.append("\n".join(block_lines))
-
-    for grp in group_hits:
-        full = full_groups_map.get(grp["id"], grp)
-        block_lines = [
-            f"[Doc #{grp['id']}] (multi-page group) {full.get('title', 'Untitled')}",
-            f"Date: {full.get('date_depicted') or full.get('date_range_start') or 'Unknown'}",
-            f"Location: {full.get('location') or 'Unknown'}",
-            f"Description: {full.get('description') or ''}",
-        ]
-        if full.get("annotation"):
-            block_lines.append(f"Researcher note: {full['annotation']}")
-        doc_blocks.append("\n".join(block_lines))
+            ph = ",".join("?" * len(group_ids))
+            txn_rows += [("Group", {**dict(t), "document_id": t["group_id"]})
+                         for t in conn.execute(
+                f"""SELECT * FROM group_transactions
+                    WHERE group_id IN ({ph}) ORDER BY date""", group_ids)]
 
     txn_blocks = []
-    for txn in txn_blocks_raw:
-        t = dict(txn)
-        parts = [f"[Doc #{t['document_id']}]"]
-        if t.get("date"):        parts.append(f"Date: {t['date']}")
-        if t.get("seller"):      parts.append(f"Seller: {t['seller']}")
-        if t.get("buyer"):       parts.append(f"Buyer: {t['buyer']}")
+    for label, t in txn_rows:
+        parts = [f"[{label} #{t['document_id']}]"]
+        if t.get("date"):          parts.append(f"Date: {t['date']}")
+        if t.get("seller"):        parts.append(f"Seller: {t['seller']}")
+        if t.get("buyer"):         parts.append(f"Buyer: {t['buyer']}")
         if t.get("price"):
-            currency = t.get("currency") or ""
-            parts.append(f"Price: {t['price']} {currency}")
-        if t.get("auction_house"): parts.append(f"Auction: {t['auction_house']} lot {t.get('lot_number','')}")
-        if t.get("location"):    parts.append(f"Location: {t['location']}")
-        if t.get("notes"):       parts.append(f"Notes: {t['notes']}")
+            parts.append(f"Price: {t['price']} {t.get('currency') or ''}".rstrip())
+        if t.get("auction_house"): parts.append(
+            f"Auction: {t['auction_house']} lot {t.get('lot_number') or ''}".rstrip())
+        if t.get("location"):      parts.append(f"Location: {t['location']}")
+        if t.get("notes"):         parts.append(f"Notes: {t['notes']}")
         txn_blocks.append(" | ".join(parts))
 
     context = QA_CONTEXT_TEMPLATE.format(
-        doc_blocks="\n\n".join(doc_blocks) or "No documents.",
+        doc_blocks="\n\n---\n\n".join(doc_blocks) or "No documents.",
         txn_blocks="\n".join(txn_blocks) or "No transactions recorded.",
         question=question,
     )
 
-    # 4. Call Claude
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.create(
@@ -190,39 +265,60 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Claude Q&A failed")
         return {
-            "answer":     f"Error calling Claude API: {exc}",
-            "sources":    doc_ids,
-            "confidence": "none",
-            "citations":  [],
+            "answer":       f"Error calling Claude API: {exc}",
+            "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
+                             for u in units],
+            # units were retrieved, but no answer (and so no citations)
+            # was successfully produced:
+            "retrieved_source_count": len(units),
+            "cited_source_count":     0,
+            "source_count": 0,
+            "confidence":   None,   # DEPRECATED
+            "citations":    [],
+            "context_items": [_context_item_meta(u) for u in units],
+            "retrieval":    retrieval_meta,
         }
 
-    # 5. Extract cited doc IDs from the answer
-    cited_ids = list(set(int(m) for m in re.findall(r"\[Doc #(\d+)\]", answer_text)))
-
-    # Confidence heuristic: high if ≥3 docs cited, medium if 1-2, low if none
-    if len(cited_ids) >= 3:
-        confidence = "high"
-    elif len(cited_ids) >= 1:
-        confidence = "medium"
-    elif "do not contain" in answer_text.lower() or "no information" in answer_text.lower():
-        confidence = "none"
-    else:
-        confidence = "low"
+    # Extract cited IDs, keeping doc/group namespaces distinct.
+    cited = set()
+    for label, num in re.findall(r"\[(Doc|Group)\s*#(\d+)\]", answer_text):
+        cited.add(("document" if label == "Doc" else "group", int(num)))
 
     citations = []
-    for doc in docs:
-        if doc["id"] in cited_ids:
+    for u in units:
+        if (u["record_type"], u["unit_id"]) in cited:
+            evidence = u.get("evidence_chunks") or []
+            snippet = (evidence[0]["text"] if evidence
+                       else (u.get("excerpt") or ""))[:200]
             citations.append({
-                "doc_id":       doc["id"],
-                "title":        doc.get("title", "Untitled"),
-                "snippet":      doc.get("description", "")[:200],
-                "record_type":  doc.get("record_type", "document"),
+                "doc_id":              u["unit_id"],
+                "record_type":         u["record_type"],
+                "title":               u.get("title") or "Untitled",
+                "source_archive":      u.get("source_archive"),
+                "date":                u.get("date_display"),
+                "representation_type": u.get("representation_type"),
+                "has_transcription":   u.get("has_transcription", False),
+                "snippet":             snippet,
             })
 
-    all_source_ids = doc_ids + group_ids
     return {
-        "answer":     answer_text,
-        "sources":    all_source_ids,
-        "confidence": confidence,
-        "citations":  citations,
+        "answer":       answer_text,
+        "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
+                         for u in units],
+        # Retrieved vs cited are different facts: `retrieved_source_count`
+        # counts units supplied to RAG; `cited_source_count` counts valid
+        # [Doc #N]/[Group #N] citations actually parsed from the answer
+        # (citations referring to units not in context are ignored).
+        # `source_count` is a compatibility alias for cited_source_count.
+        "retrieved_source_count": len(units),
+        "cited_source_count":     len(citations),
+        "source_count": len(citations),
+        # DEPRECATED: always None. The old high/medium/low value was derived
+        # from citation count, which is not a valid measure of evidentiary
+        # confidence. Kept (as null) only so existing frontend code that
+        # checks `entry.confidence` degrades gracefully.
+        "confidence":   None,
+        "citations":    citations,
+        "context_items": [_context_item_meta(u) for u in units],
+        "retrieval":    retrieval_meta,
     }

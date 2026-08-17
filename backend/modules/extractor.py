@@ -447,11 +447,19 @@ def _get_media_type(path: Path) -> str:
 
 def generate_text_embedding(text: str, api_key: str) -> list[float] | None:
     """
-    Generate a simple embedding vector for semantic search.
+    LEGACY — NOT a semantic embedding. Do not use for retrieval.
 
-    Since Anthropic does not yet expose a standalone embeddings endpoint,
-    we use a TF-IDF-inspired bag-of-words approach with 512-dim hashing.
-    This gives useful semantic similarity without external dependencies.
+    This is a 512-dim hashed bag-of-words vector (MD5 token hashing with
+    TF-log weighting). It captures lexical overlap only, has no semantic
+    properties, and must never be described or used as semantic search.
+
+    Real semantic embeddings are produced by modules/embeddings.py (Voyage
+    voyage-4 by default) and stored per-chunk in retrieval_embeddings with
+    provider/model/version metadata; see modules/indexer.py. This function
+    is retained only so the historical vectors in documents.embedding_json /
+    document_groups.embedding_json remain interpretable. No production code
+    path calls it any more, and it must not be reintroduced as a fallback
+    when the embedding provider is unavailable.
 
     Returns a list of 512 floats, or None on error.
     """

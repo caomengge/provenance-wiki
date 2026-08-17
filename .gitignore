@@ -24,3 +24,6 @@ frontend/.vite/
 
 # Claude Code settings
 .claude/
+
+# Experiment outputs
+experiments/results/

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
 import TagFilter from '../components/TagFilter'
@@ -14,6 +14,9 @@ export default function Search() {
   const [page, setPage]       = useState(1)
   const [loading, setLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  // Deterministic filename lookup (metadata utility, separate from the
+  // relevance-ranked results — never merged into them).
+  const [filenameMatches, setFilenameMatches] = useState([])
 
   // Filter options
   const [filterEntity,     setFilterEntity]     = useState(searchParams.get('entity_id') || '')
@@ -71,6 +74,7 @@ export default function Search() {
       const res = await api.search(params)
       setResults(res.results || [])
       setTotal(res.total || 0)
+      setFilenameMatches(res.filename_matches?.matches || [])
       setPage(p)
     } catch (err) {
       console.error(err)
@@ -268,6 +272,41 @@ export default function Search() {
       </div>
 
       <div style={{ padding: '1.5rem 2rem' }}>
+        {/* Filename matches — a deterministic metadata lookup on the image
+            file name, shown separately from the relevance-ranked results so
+            it never affects (or appears to affect) retrieval ranking. */}
+        {!loading && filenameMatches.length > 0 && (
+          <div style={{ marginBottom: '1.5rem', border: '1px solid var(--border)', borderRadius: '4px', background: 'var(--cream-bg)' }}>
+            <div style={{ padding: '0.5rem 0.9rem', borderBottom: '1px solid var(--border)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-muted)' }}>
+              Filename {filenameMatches.length === 1 ? 'match' : 'matches'} · exact file-name lookup
+            </div>
+            {filenameMatches.map(m => (
+              <div key={m.id} style={{ padding: '0.6rem 0.9rem', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <code style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--navy)' }}>
+                  {m.filename}
+                </code>
+                <span style={{ fontSize: '0.7rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '3px', padding: '0.05rem 0.35rem' }}>
+                  {m.filename_match}
+                </span>
+                <Link to={`/documents/${m.id}`} style={{ fontSize: '0.9rem' }}>
+                  Doc #{m.id}: {m.title || 'Untitled'}
+                </Link>
+                {m.group_id && (
+                  <Link to={`/groups/${m.group_id}`} style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    (page {m.page_number || '?'} of Group #{m.group_id})
+                  </Link>
+                )}
+                {m.source_archive && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>· {m.source_archive}</span>
+                )}
+                {m.date && (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>· {m.date}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {loading ? (
           <div className="loading">Searching…</div>
         ) : !hasSearched ? (
@@ -277,8 +316,12 @@ export default function Search() {
           </div>
         ) : results.length === 0 ? (
           <div className="empty-state">
-            <h3>No results found</h3>
-            <p>Try different keywords or switch to semantic search mode.</p>
+            <h3>{filenameMatches.length > 0 ? 'No text matches' : 'No results found'}</h3>
+            <p>
+              {filenameMatches.length > 0
+                ? 'The file name above matched a document, but the query text was not found in any transcription or record.'
+                : 'Try different keywords or switch to semantic search mode.'}
+            </p>
           </div>
         ) : (
           <>

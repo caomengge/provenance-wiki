@@ -1,12 +1,22 @@
 """
-search.py – Full-text and semantic search for provenance documents.
+search.py – Full-text, semantic, and hybrid search for provenance documents.
 
-Two modes:
-  keyword  – SQLite FTS5 with BM25 ranking and snippet highlighting.
-             Handles English and CJK text natively via unicode61 tokeniser.
-  semantic – Cosine similarity over pre-computed embedding vectors stored
-             as JSON in documents.embedding_json.  Falls back gracefully
-             if no embeddings are stored yet.
+Modes:
+  keyword  – SQLite FTS5 (documents_fts/groups_fts) with BM25 ranking and
+             snippet highlighting. Handles English and CJK text natively
+             via the unicode61 tokeniser. Unchanged browse behaviour.
+  semantic – REAL semantic retrieval: cosine similarity over neural chunk
+             embeddings in the retrieval index (modules/retrieval.py),
+             covering both primary-source transcription chunks and
+             AI-generated representations, fused per unit with reciprocal
+             rank fusion. The legacy hashed bag-of-words vectors in
+             documents.embedding_json are no longer used anywhere.
+  hybrid   – keyword + semantic lists fused with reciprocal rank fusion
+             (the same engine the Q&A pipeline uses).
+
+If the embedding provider is unavailable, semantic/hybrid responses degrade
+to keyword results and say so explicitly (`semantic_available: false`,
+`semantic_error`) — never a silent substitution.
 
 Results are always paginated and returned as a list of document dicts
 with an additional `score` and optional `snippet` field.
@@ -51,11 +61,30 @@ def search_documents(
     per_page = min(per_page, MAX_PAGE_SIZE)
     offset   = (page - 1) * per_page
 
-    if mode == "semantic":
-        return _semantic_search(query, page, per_page, offset, tag_ids, entity_id, source_archive)
+    if mode in ("semantic", "hybrid"):
+        out = _retrieval_search(query, mode, page, per_page, offset,
+                                tag_ids, entity_id, source_archive)
     else:
-        return _keyword_search(query, page, per_page, offset, tag_ids, entity_id,
-                               FTS_SNIPPET_TOKENS, source_archive)
+        out = _keyword_search(query, page, per_page, offset, tag_ids, entity_id,
+                              FTS_SNIPPET_TOKENS, source_archive)
+
+    # Deterministic filename lookup (modules/filename_lookup.py) — a metadata
+    # utility, NOT retrieval. It is computed independently and returned in its
+    # own block; `results`, their order, and their scores are never touched,
+    # so BM25/semantic/RRF ranking is unaffected in every mode.
+    out["filename_matches"] = _filename_matches(query)
+    return out
+
+
+def _filename_matches(query: str) -> dict:
+    from modules.db import get_db
+    from modules.filename_lookup import filename_match_block
+    try:
+        with get_db() as conn:
+            return filename_match_block(conn, query)
+    except Exception:
+        logger.exception("Filename lookup failed for %r", query)
+        return {"applied": False, "query": query, "matches": [], "total": 0}
 
 
 # ── Keyword search ────────────────────────────────────────────────────────────
@@ -175,68 +204,123 @@ def _keyword_search(query, page, per_page, offset, tag_ids, entity_id, snippet_t
     }
 
 
-# ── Semantic search ───────────────────────────────────────────────────────────
+# ── Semantic / hybrid search (retrieval index) ────────────────────────────────
 
-def _semantic_search(query, page, per_page, offset, tag_ids, entity_id, source_archive=None):
-    """Cosine-similarity search over stored embedding vectors."""
+def _retrieval_search(query, mode, page, per_page, offset,
+                      tag_ids, entity_id, source_archive=None):
+    """
+    Semantic or hybrid search over the chunk-level retrieval index.
+
+    mode='semantic' fuses the two semantic lists (transcription chunks +
+    generated representations); mode='hybrid' additionally fuses the
+    chunk-level keyword list. Both return per-unit results with the
+    best-matching excerpt as the snippet, the fused score, and per-list
+    ranks for transparency.
+
+    If the embedding provider is unavailable (or no vectors are indexed
+    yet), results degrade to the classic keyword search and the response
+    carries semantic_available=False + semantic_error. The legacy hashed
+    bag-of-words vectors are never used.
+    """
     from modules.db import get_db
-    from modules.extractor import generate_text_embedding
-    from config import ANTHROPIC_API_KEY, SEMANTIC_TOP_K
+    from modules.retrieval import hybrid_retrieve
 
     # No query text — browse by filters only (same as keyword mode)
     if not query.strip():
         if tag_ids or entity_id or source_archive:
             return _filter_only_search(page, per_page, offset, tag_ids, entity_id, source_archive)
-        return _empty_result(page, per_page, "semantic")
+        return _empty_result(page, per_page, mode)
 
-    # Generate query embedding
-    q_vec = generate_text_embedding(query, ANTHROPIC_API_KEY)
-    if q_vec is None:
-        logger.warning("Could not generate query embedding; falling back to keyword")
-        return _keyword_search(query, page, per_page, offset, tag_ids, entity_id, 64)
-
-    joins, wheres, params = _build_filters(tag_ids, entity_id, source_archive)
+    fetch_n = offset + per_page  # retrieve enough fused units for this page
 
     with get_db() as conn:
-        filter_sql = f"""
-            SELECT d.*
-            FROM documents d
-            {joins}
-            WHERE d.embedding_json IS NOT NULL
-            {' AND ' + ' AND '.join(wheres) if wheres else ''}
-        """
-        rows = conn.execute(filter_sql, params).fetchall()
+        retrieval = hybrid_retrieve(
+            conn, query,
+            top_k=max(fetch_n * 2, 50),   # headroom for tag/entity post-filters
+            source_archive=source_archive,
+            include_keyword=(mode == "hybrid"),
+        )
 
-    if not rows:
-        logger.info("No documents have embeddings yet; falling back to keyword search")
-        return _keyword_search(query, page, per_page, offset, tag_ids, entity_id, 64)
+        if not retrieval["semantic_available"]:
+            # Honest degradation: run the classic keyword search and label it.
+            out = _keyword_search(query, page, per_page, offset, tag_ids,
+                                  entity_id, 64, source_archive)
+            out["mode"] = "keyword"
+            out["requested_mode"] = mode
+            out["semantic_available"] = False
+            out["semantic_error"] = retrieval["semantic_error"]
+            return out
 
-    # Score all rows
-    scored = []
-    for row in rows:
-        d = dict(row)
-        emb_json = d.pop("embedding_json", None)
-        d.pop("raw_claude_response", None)
-        try:
-            doc_vec = json.loads(emb_json)
-            score   = _cosine_sim(q_vec, doc_vec)
-        except Exception:
-            score = 0.0
-        d["score"] = score
-        scored.append(d)
+        units = retrieval["results"]
 
-    scored.sort(key=lambda x: x["score"], reverse=True)
-    total   = len(scored)
-    results = scored[offset: offset + per_page]
+        # Optional tag/entity filters (chunk index carries archive only).
+        if tag_ids or entity_id:
+            units = [u for u in units
+                     if _unit_passes_filters(conn, u, tag_ids, entity_id)]
+
+        total = len(units)
+        page_units = units[offset: offset + per_page]
+
+        results = []
+        for u in page_units:
+            row = _fetch_unit_row(conn, u["unit_id"], u["record_type"])
+            if row is None:
+                continue
+            d = dict(row)
+            d.pop("embedding_json", None)
+            d.pop("raw_claude_response", None)
+            d["record_type"] = u["record_type"]
+            d["score"] = round(u["fused_score"], 6)
+            excerpt = (u.get("excerpt") or "")
+            d["snippet"] = excerpt[:400] + ("…" if len(excerpt) > 400 else "")
+            d["representation_type"] = u.get("representation_type")
+            d["keyword_rank"] = u.get("keyword_rank")
+            d["semantic_transcription_rank"] = u.get("semantic_transcription_rank")
+            d["semantic_generated_rank"] = u.get("semantic_generated_rank")
+            results.append(d)
 
     return {
         "results":  results,
         "total":    total,
         "page":     page,
         "per_page": per_page,
-        "mode":     "semantic",
+        "mode":     mode,
         "query":    query,
+        "semantic_available": True,
+        "provider": retrieval.get("provider"),
+        "model":    retrieval.get("model"),
+        "fusion":   retrieval.get("fusion"),
     }
+
+
+def _fetch_unit_row(conn, unit_id, record_type):
+    if record_type == "document":
+        return conn.execute("SELECT * FROM documents WHERE id=? AND is_trashed=0",
+                            (unit_id,)).fetchone()
+    return conn.execute(
+        """SELECT id, title, date_depicted, location, medium,
+                  is_key_evidence, source_archive, created_at, updated_at,
+                  description, annotation
+           FROM document_groups WHERE id=? AND is_trashed=0""",
+        (unit_id,)).fetchone()
+
+
+def _unit_passes_filters(conn, unit, tag_ids, entity_id):
+    uid, rt = unit["unit_id"], unit["record_type"]
+    if tag_ids:
+        ph = ",".join("?" * len(tag_ids))
+        sql = (f"SELECT 1 FROM document_tags WHERE document_id=? AND tag_id IN ({ph})"
+               if rt == "document" else
+               f"SELECT 1 FROM group_tags WHERE group_id=? AND tag_id IN ({ph})")
+        if not conn.execute(sql, [uid] + list(tag_ids)).fetchone():
+            return False
+    if entity_id:
+        sql = ("SELECT 1 FROM document_entities WHERE document_id=? AND entity_id=?"
+               if rt == "document" else
+               "SELECT 1 FROM group_entities WHERE group_id=? AND entity_id=?")
+        if not conn.execute(sql, (uid, entity_id)).fetchone():
+            return False
+    return True
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
