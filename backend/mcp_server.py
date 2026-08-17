@@ -302,10 +302,14 @@ def main():
                 return f"#{s}"
 
             meta = result.get("retrieval") or {}
+            retrieved = result.get("retrieved_source_count",
+                                   len(result.get("sources", [])))
+            cited = result.get("cited_source_count",
+                               len(result.get("citations", [])))
             lines = [
                 result["answer"],
                 "",
-                f"**Sources consulted:** {result.get('source_count', len(result.get('sources', [])))} "
+                f"**Sources:** {retrieved} retrieved, {cited} cited in the answer "
                 f"({', '.join(_src_label(s) for s in result.get('sources', []))})",
                 f"**Retrieval:** {meta.get('mode', '?')}"
                 + (f" — {meta.get('provider')}/{meta.get('model')}" if meta.get("provider") else "")

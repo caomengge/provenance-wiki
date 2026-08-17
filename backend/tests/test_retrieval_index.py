@@ -578,9 +578,10 @@ def test_qa_receives_actual_transcription_excerpts(test_db, fake_backend, monkey
     assert out["citations"][0]["record_type"] == "document"
     assert out["citations"][0]["source_archive"] == "Nelson-Atkins"
     # confidence is DEPRECATED (was citation-count-derived); replaced by
-    # source_count + retrieval metadata
+    # retrieved/cited counts + retrieval metadata
     assert out["confidence"] is None
-    assert out["source_count"] == len(out["sources"]) > 0
+    assert out["retrieved_source_count"] == len(out["sources"]) > 0
+    assert out["cited_source_count"] == out["source_count"] == 1  # [Doc #1] only
     assert out["retrieval"]["semantic_available"] is True
     assert out["retrieval"]["provider"] == "fake"
     # discovery vs evidence separation is exposed for the frontend
@@ -590,6 +591,105 @@ def test_qa_receives_actual_transcription_excerpts(test_db, fake_backend, monkey
     assert item["discovery_matches"] and item["evidence_chunks"]
     assert item["evidence_chunks"][0]["method"] == "semantic"
     assert "purchased quietly" in item["evidence_chunks"][0]["text"]
+
+
+def _fake_claude(monkeypatch, answer_text):
+    """Patch anthropic.Anthropic in qa.py; returns dict capturing the call."""
+    from modules import qa as qa_mod
+    captured = {}
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            class _Resp:
+                content = [type("B", (), {"text": answer_text})()]
+            return _Resp()
+
+    class _FakeAnthropic:
+        def __init__(self, api_key=None):
+            self.messages = _FakeMessages()
+
+    monkeypatch.setattr(qa_mod.anthropic, "Anthropic", _FakeAnthropic)
+    return captured
+
+
+def test_retrieved_vs_cited_source_counts(test_db, fake_backend, monkeypatch):
+    """10+ retrieved units, 2 cited → retrieved_source_count reflects the RAG
+    context, cited_source_count/source_count count only valid citations."""
+    with dbmod.get_db() as conn:
+        for i in range(8):
+            conn.execute(
+                f"""INSERT INTO documents (id, filename, sha256, title,
+                    transcription, source_archive)
+                    VALUES ({20 + i},'x{i}.jpg','shx{i}','Letter {i} about the museum shipment',
+                            'The museum shipment letter number {i} mentions crates and customs.',
+                            'Nelson-Atkins')""")
+    _backfill(fake_backend)
+
+    _fake_claude(monkeypatch,
+                 "Crates were shipped [Doc #20] and cleared customs [Doc #21]. "
+                 "[Doc #999] does not exist in this context.")
+    from modules import qa as qa_mod
+    out = qa_mod.answer_question("museum shipment crates customs", "test-key")
+
+    assert out["retrieved_source_count"] == len(out["sources"]) >= 10
+    assert out["cited_source_count"] == 2
+    assert out["source_count"] == 2            # redefined: cited, not retrieved
+    assert {c["doc_id"] for c in out["citations"]} == {20, 21}
+    # an uncited retrieved unit contributes to retrieved_source_count only
+    retrieved_ids = {(s["record_type"], s["id"]) for s in out["sources"]}
+    assert ("document", 1) in retrieved_ids
+    assert 1 not in {c["doc_id"] for c in out["citations"]}
+    # invalid citation [Doc #999] was ignored entirely
+    assert 999 not in {c["doc_id"] for c in out["citations"]}
+
+
+def test_api_failure_zeroes_cited_but_not_retrieved(test_db, fake_backend, monkeypatch):
+    """On model failure: units were retrieved, but no citations were produced."""
+    from modules import qa as qa_mod
+
+    class _Boom:
+        def __init__(self, api_key=None):
+            class _M:
+                def create(self, **kwargs):
+                    raise RuntimeError("simulated API outage")
+            self.messages = _M()
+
+    monkeypatch.setattr(qa_mod.anthropic, "Anthropic", _Boom)
+    _backfill(fake_backend)
+    out = qa_mod.answer_question("temple ceiling", "test-key")
+    assert out["retrieved_source_count"] > 0
+    assert out["cited_source_count"] == 0
+    assert out["source_count"] == 0
+    assert out["citations"] == []
+
+
+def test_transactions_labelled_finding_aid_and_terminology(test_db, fake_backend, monkeypatch):
+    """Machine-extracted transactions are explicitly finding aids in the
+    prompt, and PRIMARY-SOURCE EVIDENCE terminology is used consistently."""
+    _backfill(fake_backend)
+    captured = _fake_claude(monkeypatch, "The ceiling was bought [Doc #1].")
+    from modules import qa as qa_mod
+    qa_mod.answer_question("Who purchased the temple ceiling?", "test-key")
+
+    system = captured["system"]
+    prompt = captured["messages"][0]["content"]
+
+    # transactions section (doc #1 has a machine-extracted transaction) is
+    # present and explicitly labelled as a finding aid, not evidence
+    assert "RELATED TRANSACTIONS (machine-extracted — finding aid" in prompt
+    assert "NOT primary evidence" in prompt
+    assert "C. T. Loo" in prompt                      # the transaction itself
+    # system prompt: transactions need primary-source corroboration
+    assert "machine-extracted transaction" in system
+    assert "corroborated by the supplied PRIMARY-SOURCE EVIDENCE" in system
+    assert "unverified" in system
+
+    # standardized terminology — the old EXCERPT wording is gone everywhere
+    assert "PRIMARY-SOURCE EXCERPT" not in system
+    assert "PRIMARY-SOURCE EXCERPT" not in prompt
+    assert "PRIMARY-SOURCE EVIDENCE" in system
+    assert "PRIMARY-SOURCE EVIDENCE" in prompt
 
 
 # ── Migration safety ──────────────────────────────────────────────────────────

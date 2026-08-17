@@ -156,3 +156,13 @@ After fusion selects the top units, Q&A hydrates evidence per unit: for every se
 The high/medium/low `confidence` derived from the number of cited documents is deprecated: the field is retained as `null` only because the current QA frontend reads `entry.confidence` (its falsiness guard hides the chip cleanly). The response now carries `source_count`, and `retrieval.{mode, semantic_available, semantic_error, provider, model, fusion}` as the honest description of retrieval conditions. The MCP server's answer formatting reports sources consulted and retrieval mode instead of confidence.
 
 Tests: 39 passing (4 new — keyword-transcription regression incl. degraded mode, hydration relevance ranking with semantic and keyword fallback, generated-only-discovery still yielding primary evidence end-to-end through QA). Files changed in this correction: `modules/retrieval.py`, `modules/qa.py`, `mcp_server.py`, `tests/test_retrieval_index.py`, `README.md`, this addendum. No schema changes; no frontend changes.
+
+## Addendum 2 — Q&A contract / grounding corrections (2026-08-17, pre-freeze)
+
+**Retrieved vs cited source counts.** The QA response now reports `retrieved_source_count` (retrieval units supplied to the RAG context) and `cited_source_count` (valid `[Doc #N]`/`[Group #N]` citations parsed from the answer; citations referring to units not in context are ignored). `source_count` is kept for compatibility but REDEFINED as an alias of `cited_source_count`. On API/model failure: `retrieved_source_count` > 0, `cited_source_count` = `source_count` = 0.
+
+**Machine-extracted transactions are finding aids.** The RELATED TRANSACTIONS context heading now reads "machine-extracted — finding aid / organizational metadata, NOT primary evidence", and the system prompt adds an explicit rule: no substantive historical claim may rest solely on a machine-extracted transaction unless corroborated by the supplied PRIMARY-SOURCE EVIDENCE; unsupported transaction fields must be described as unverified. Transactions remain useful for chronology and leads.
+
+**Terminology standardized.** "PRIMARY-SOURCE EVIDENCE" is used consistently in the system prompt and context; the older "PRIMARY-SOURCE EXCERPT" wording is removed.
+
+Tests: 42 passing (3 new — retrieved-vs-cited counts with an ignored invalid citation and an uncited unit, API-failure count semantics, finding-aid labelling + terminology consistency). Files changed: `modules/qa.py`, `mcp_server.py`, `tests/test_retrieval_index.py`, this addendum. No retrieval-ranking, RRF, chunking, embedding, indexing, schema, or frontend changes.

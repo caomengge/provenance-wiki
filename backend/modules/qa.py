@@ -26,7 +26,8 @@ Pipeline:
   4. Pull matching transactions for the retrieved units.
   5. Send to Claude with a system prompt that requires citation of
      [Doc #N] / [Group #N] and forbids speculation beyond the evidence.
-  6. Return {answer, sources, source_count, citations, context_items,
+  6. Return {answer, sources, retrieved_source_count, cited_source_count,
+     source_count (= cited), citations, context_items,
      retrieval} so the underlying documents can be inspected directly and
      the frontend can later show both "why this document was found" and
      "passage used as evidence". The legacy `confidence` field is
@@ -46,20 +47,21 @@ QA_SYSTEM_PROMPT = """You are a meticulous museum provenance researcher. Your ro
 
 Rules:
 1. Base every claim on the provided source documents. Never speculate or add information from outside the provided context.
-2. Primary evidence is the text under "PRIMARY-SOURCE EXCERPT" — the transcribed archival document itself. Fields labelled "machine-generated" were produced by an AI at ingest time; treat them as finding aids, not as evidence.
+2. The evidentiary basis of your answer is the text under "PRIMARY-SOURCE EVIDENCE" — the transcribed archival documents themselves. Machine-generated descriptions, machine-extracted entities, and machine-extracted transactions were produced by an AI at ingest time; treat all of them as finding aids / organizational metadata, never as primary historical evidence.
 3. When you cite a fact, always note the document ID(s) that support it (format: [Doc #N] for documents, [Group #N] for multi-page groups). Cite only documents provided in the context.
-4. If the answer is not in the provided documents, say so clearly: "The available documents do not contain information about this."
-5. For ownership chains, present them chronologically.
-6. Note any gaps or uncertainties in the provenance record, and mention the source archive a document comes from when it matters.
-7. A document marked "no transcription available" has only machine-generated metadata. You may mention it as a lead worth consulting, but never make a substantive historical claim that rests solely on its machine-generated metadata.
-8. Preserve non-English names and terms exactly as they appear in the source documents.
-9. Be concise but thorough. Prefer bullet points for ownership chains."""
+4. Never make a substantive historical claim that rests solely on a machine-extracted transaction unless it is corroborated by the supplied PRIMARY-SOURCE EVIDENCE. Transactions may help organize chronology or identify leads, but describe any transaction field unsupported by the primary-source transcriptions as unverified rather than asserting it as fact.
+5. If the answer is not in the provided documents, say so clearly: "The available documents do not contain information about this."
+6. For ownership chains, present them chronologically.
+7. Note any gaps or uncertainties in the provenance record, and mention the source archive a document comes from when it matters.
+8. A document marked as having no PRIMARY-SOURCE EVIDENCE carries only machine-generated metadata. You may mention it as a lead worth consulting, but never make a substantive historical claim that rests solely on its machine-generated metadata.
+9. Preserve non-English names and terms exactly as they appear in the source documents.
+10. Be concise but thorough. Prefer bullet points for ownership chains."""
 
 QA_CONTEXT_TEMPLATE = """PROVENANCE DOCUMENTS FOR CONTEXT
 =================================
 {doc_blocks}
 
-RELATED TRANSACTIONS (machine-extracted)
+RELATED TRANSACTIONS (machine-extracted — finding aid / organizational metadata, NOT primary evidence; verify against PRIMARY-SOURCE EVIDENCE before asserting)
 ========================================
 {txn_blocks}
 
@@ -158,7 +160,12 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
         {
             answer:        str,
             sources:       [{id, record_type}],
-            source_count:  int,
+            retrieved_source_count: int — retrieval units supplied to RAG,
+            cited_source_count:     int — valid [Doc #N]/[Group #N]
+                                    citations parsed from the answer,
+            source_count:  int — alias of cited_source_count (kept for
+                           compatibility; it previously meant retrieved
+                           candidates, now it means actually cited sources),
             confidence:    None (DEPRECATED — kept for frontend
                            compatibility only; citation count is not a
                            valid measure of evidentiary confidence),
@@ -191,6 +198,8 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
             return {
                 "answer":       "No relevant documents were found in the archive for this question.",
                 "sources":      [],
+                "retrieved_source_count": 0,
+                "cited_source_count":     0,
                 "source_count": 0,
                 "confidence":   None,   # DEPRECATED
                 "citations":    [],
@@ -259,7 +268,11 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
             "answer":       f"Error calling Claude API: {exc}",
             "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
                              for u in units],
-            "source_count": len(units),
+            # units were retrieved, but no answer (and so no citations)
+            # was successfully produced:
+            "retrieved_source_count": len(units),
+            "cited_source_count":     0,
+            "source_count": 0,
             "confidence":   None,   # DEPRECATED
             "citations":    [],
             "context_items": [_context_item_meta(u) for u in units],
@@ -292,7 +305,14 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
         "answer":       answer_text,
         "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
                          for u in units],
-        "source_count": len(units),
+        # Retrieved vs cited are different facts: `retrieved_source_count`
+        # counts units supplied to RAG; `cited_source_count` counts valid
+        # [Doc #N]/[Group #N] citations actually parsed from the answer
+        # (citations referring to units not in context are ignored).
+        # `source_count` is a compatibility alias for cited_source_count.
+        "retrieved_source_count": len(units),
+        "cited_source_count":     len(citations),
+        "source_count": len(citations),
         # DEPRECATED: always None. The old high/medium/low value was derived
         # from citation count, which is not a valid measure of evidentiary
         # confidence. Kept (as null) only so existing frontend code that
