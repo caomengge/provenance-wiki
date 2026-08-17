@@ -46,6 +46,31 @@ def search():
     return jsonify(result)
 
 
+@bp.route("/api/lookup/filename", methods=["GET"])
+def lookup_filename():
+    """
+    Deterministic image-filename lookup (metadata utility, not retrieval).
+
+    GET /api/lookup/filename?q=IMG_4683.JPG  → exact match first, then stem,
+    prefix and substring matches. Never consults embeddings, BM25, or the
+    retrieval index.
+    """
+    from modules.db import get_db
+    from modules.filename_lookup import find_by_filename
+
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify({"error": "q is required"}), 400
+
+    limit = min(int(request.args.get("limit", 25)), 100)
+    include_trashed = request.args.get("include_trashed", "").lower() == "true"
+
+    with get_db() as conn:
+        matches = find_by_filename(conn, q, limit=limit,
+                                   include_trashed=include_trashed)
+    return jsonify({"query": q, "matches": matches, "total": len(matches)})
+
+
 # ── Tags CRUD ─────────────────────────────────────────────────────────────────
 
 @bp.route("/api/tags", methods=["GET"])

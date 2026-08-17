@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
 import DocPreviewPanel from '../components/DocPreviewPanel'
 
@@ -24,6 +25,19 @@ export default function QA() {
   const [panelDocId, setPanelDocId] = useState(null)
   const bottomRef = useRef(null)
   const inputRef  = useRef(null)
+  const navigate  = useNavigate()
+
+  // Citations carry record_type ('document' | 'group'). Document IDs and
+  // group IDs are SEPARATE sequences, so a group citation must never be
+  // opened as a document (that showed an unrelated or missing record) —
+  // it opens the multi-page group page instead.
+  const citationLabel = c =>
+    `${c.record_type === 'group' ? 'Group' : 'Doc'} #${c.doc_id}`
+
+  const openCitation = c => {
+    if (c.record_type === 'group') navigate(`/groups/${c.doc_id}`)
+    else setPanelDocId(c.doc_id)
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -191,8 +205,8 @@ export default function QA() {
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
                             {entry.citations.map(c => (
                               <button
-                                key={c.doc_id}
-                                onClick={() => setPanelDocId(c.doc_id)}
+                                key={`${c.record_type || 'document'}-${c.doc_id}`}
+                                onClick={() => openCitation(c)}
                                 style={{
                                   display: 'inline-block',
                                   background: 'var(--cream-bg)',
@@ -205,7 +219,7 @@ export default function QA() {
                                   fontFamily: 'inherit',
                                 }}
                               >
-                                Doc #{c.doc_id}: {c.title?.substring(0, 30)}{c.title?.length > 30 ? '…' : ''}
+                                {citationLabel(c)}: {c.title?.substring(0, 30)}{c.title?.length > 30 ? '…' : ''}
                               </button>
                             ))}
                           </div>

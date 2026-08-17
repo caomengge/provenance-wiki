@@ -62,11 +62,29 @@ def search_documents(
     offset   = (page - 1) * per_page
 
     if mode in ("semantic", "hybrid"):
-        return _retrieval_search(query, mode, page, per_page, offset,
-                                 tag_ids, entity_id, source_archive)
+        out = _retrieval_search(query, mode, page, per_page, offset,
+                                tag_ids, entity_id, source_archive)
     else:
-        return _keyword_search(query, page, per_page, offset, tag_ids, entity_id,
-                               FTS_SNIPPET_TOKENS, source_archive)
+        out = _keyword_search(query, page, per_page, offset, tag_ids, entity_id,
+                              FTS_SNIPPET_TOKENS, source_archive)
+
+    # Deterministic filename lookup (modules/filename_lookup.py) — a metadata
+    # utility, NOT retrieval. It is computed independently and returned in its
+    # own block; `results`, their order, and their scores are never touched,
+    # so BM25/semantic/RRF ranking is unaffected in every mode.
+    out["filename_matches"] = _filename_matches(query)
+    return out
+
+
+def _filename_matches(query: str) -> dict:
+    from modules.db import get_db
+    from modules.filename_lookup import filename_match_block
+    try:
+        with get_db() as conn:
+            return filename_match_block(conn, query)
+    except Exception:
+        logger.exception("Filename lookup failed for %r", query)
+        return {"applied": False, "query": query, "matches": [], "total": 0}
 
 
 # ── Keyword search ────────────────────────────────────────────────────────────
