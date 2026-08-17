@@ -1,83 +1,73 @@
-# Retrieval-Methods Experiment
+# Retrieval-Methods Experiment (`chunked_retrieval_v1`)
 
-A reproducible digital-humanities experiment comparing how different representations of the archive (primary-source transcription vs. AI-generated modelling) and different retrieval methods (lexical vs. neural-semantic) affect what a researcher discovers. Built alongside the production app — nothing in the existing application or ingested data was modified.
+A reproducible digital-humanities experiment comparing how different representations of the archive (primary-source transcription vs. AI-generated modelling) and different retrieval methods (lexical vs. neural-semantic) affect what a researcher discovers.
 
-## Architecture
+As of configuration **`chunked_retrieval_v1`**, the experiment runs on the **production chunk-level retrieval infrastructure** (`retrieval_chunks` / `retrieval_chunks_fts` / `retrieval_embeddings`, built by `scripts/reindex.py`) with the **production embedding model — Voyage `voyage-4` by default**. There is no separate experimental retrieval architecture: conditions A–C are thin, isolated wrappers over the production candidate generators (`retrieval.keyword_candidates` / `retrieval.semantic_candidates`), and D's evidence stage is the production `retrieval.hydrate_evidence`. Every run records the embedding provider/model, the index schema version, and the `chunked_retrieval_v1` configuration label, so results are tied to the exact retrieval architecture that produced them.
 
-Four independently selectable conditions, all operating on **retrieval units** (standalone documents + multi-page groups; grouped pages are never retrieved individually):
+## Conditions
 
-| Mode | Method | Representation searched |
+All conditions operate on **retrieval units** (standalone documents + multi-page groups; grouped pages are never retrieved individually). Retrieval is chunk-level: chunks are ranked by the condition's own scorer, then a unit's rank is the rank of its best chunk. Transcriptions are chunked by the production chunker (paragraph packing ≤1,500 chars, 200-char overlap); oversized generated representations are split line-wise — **no text is embedded as one single long vector**.
+
+| Mode | Method | Chunks searched |
 |---|---|---|
-| `keyword_original` | FTS5 BM25 (ranked OR of terms) | Primary-source transcription |
-| `semantic_original` | Neural embedding + cosine | Primary-source transcription |
-| `semantic_modelled` | Neural embedding + cosine | Deterministic AI representation (title, description, entities+roles+contexts, transactions, tags — **no annotations, no transcription**) |
-| `rag` | One named mode above (default `semantic_modelled`) → LLM synthesis | Generator receives **primary transcriptions**; AI descriptions labelled as machine-generated |
+| A `keyword_original` | FTS5 BM25 (ranked OR of terms) | `representation_type="transcription"` ONLY |
+| B `semantic_original` | Voyage cosine similarity | `representation_type="transcription"` ONLY |
+| C `semantic_modelled` | Voyage cosine similarity | `representation_type="generated"` ONLY (description, entities+roles, transactions, tags, dates, source metadata — **no transcription, no annotations**) |
+| D `rag` | C's **frozen** document ranking → within-document PRIMARY-SOURCE EVIDENCE hydration → Claude synthesis | discovery via C; evidence via each selected unit's own transcription chunks |
 
-Methodological guarantees, enforced in code and covered by tests: no silent fallback between methods (failures raise and are logged as `failed`); retrieval results are logged **before** generation and never influenced by the answer; `source_archive` and record IDs preserved end-to-end; researcher annotations never enter retrieval or RAG context; queries are never rewritten or expanded; RAG citations are validated against the retrieved set only. MODE D answers use a versioned prompt (`rag_discovery_v1`) structured as: potentially relevant evidence / what documents explicitly state / why it may be relevant / what cannot be concluded / archival leads to pursue.
+**MODE D in detail.** D runs the underlying condition (default C) exactly once; the ranking is logged **before** generation and is never re-retrieved, reranked, or extended — the LLM context iterates the frozen result list in order. Then, for each already-selected unit that has transcription, the top 1–2 transcription chunks most relevant to the **original query** are selected *from within that unit* (semantic similarity when available, keyword term-overlap fallback) and supplied to Claude as PRIMARY-SOURCE EVIDENCE. Generated representations may discover a document but remain labelled machine-generated finding aids; a unit with no transcription is flagged and grounds no substantive claim. The hydrated passages are logged per answer (`evidence_json`), so "why the document was found" (discovery chunk) and "what the model was given as evidence" (evidence chunks) are separately inspectable.
 
-New files: `backend/modules/{experiment_schema,embeddings,experiment_search,experiment_rag}.py`, `backend/scripts/{migrate_experiment,generate_experiment_embeddings}.py`, `backend/experiment.py`, `backend/tests/test_experiment.py`. The production `search.py`/`qa.py` are untouched.
+Methodological guarantees, enforced in code and covered by tests: the identical original query goes to A, B, and C; no query rewriting or expansion; no silent semantic→keyword fallback (failures raise and are logged as `failed`); retrieval results are logged before generation and never influenced by the answer; `source_archive` and record IDs are preserved end-to-end; researcher annotations never enter any representation, retrieval, or RAG context; RAG citations are validated against the frozen retrieved set only; no LLM judges retrieval relevance. MODE D answers use a versioned prompt (`rag_discovery_v2`) structured as: potentially relevant evidence / what documents explicitly state / why it may be relevant / what cannot be concluded / archival leads to pursue.
 
-## Database changes (additive only)
+Files: `backend/modules/{experiment_schema,experiment_search,experiment_rag}.py`, `backend/experiment.py`, `backend/tests/test_experiment.py`. Production modules reused: `modules/{retrieval,representations,indexer,vector_store,embeddings}.py`.
 
-- `document_embeddings` — versioned vectors: `(document_id, record_type, representation_type, provider, model_name, dim, embedding_json, source_text_sha256, created_at)`, unique per (unit, record_type, representation, model). The legacy `documents.embedding_json` (512-dim hashed bag-of-words used by the production app) is untouched.
-- `experiment_transcription_fts` — FTS5 index over primary-source transcriptions (the production `documents_fts` indexes only AI metadata + annotations).
-- `experiment_runs`, `experiment_results`, `experiment_rag_runs` — structured log of every run: query, mode, embedding model, representation, top_k, timestamp, ranked results with scores/titles/archives; for RAG additionally context IDs, full prompt, template version, LLM model, generation params, answer, validated citations.
+## Database
 
-A pre-experiment snapshot exists: `data/provenance.db.bak-20260811-pre-experiment`.
+Run logs (additive, in `experiment_schema.py`):
+
+- `experiment_runs` — one row per (query × condition): query, mode, embedding provider/model, representation type, top_k, status, **`index_schema_version`**, **`config_version`** (`chunked_retrieval_v1`).
+- `experiment_results` — ranked results with doc/unit ID, record type, score, title, source archive, and the **discovery chunk** (`chunk_id`, `representation_type`, `excerpt`).
+- `experiment_rag_runs` — MODE D generation record: frozen context IDs, prompt template version, full prompt, LLM model, generation params, answer, validated citations, and **`evidence_json`** (the hydrated PRIMARY-SOURCE EVIDENCE passages per unit, with chunk IDs, method, and scores).
+
+Legacy objects from the pre-chunk experiment (`document_embeddings` whole-unit vectors, `experiment_transcription_fts`) are **no longer used but preserved untouched**, so historical runs (pre-2026-08-17) remain reproducible. `scripts/generate_experiment_embeddings.py` is deprecated accordingly.
 
 ## Setup
 
-The embedding backend is configurable via env vars (in `.env` or shell):
+The experiment uses the same retrieval index and embedding configuration as the production app:
 
 ```
-EMBEDDING_PROVIDER=sentence_transformers   # default
-EMBEDDING_MODEL=BAAI/bge-m3                # default; multilingual (EN+中文)
+VOYAGE_API_KEY=...              # in .env (defaults: provider voyage, model voyage-4)
+# optional overrides: EMBEDDING_PROVIDER / EMBEDDING_MODEL
 ```
-
-Install the local model backend (~2.3 GB model download on first use):
-
-```bash
-cd backend
-pip install sentence-transformers
-```
-
-If torch wheels are unavailable for your Python (e.g. 3.14), either create a dedicated venv with Python 3.12, or use an API provider instead — no code changes needed:
-
-```
-# Voyage AI:            EMBEDDING_PROVIDER=voyage  VOYAGE_API_KEY=...  (pip install voyageai)
-# Any OpenAI-compatible: EMBEDDING_PROVIDER=openai_compatible
-#                        EMBEDDINGS_API_URL=https://.../v1  EMBEDDINGS_API_KEY=...  EMBEDDING_MODEL=...
-```
-
-Every stored vector and every logged run records which provider/model produced it, so switching models later adds rows rather than overwriting history.
-
-## Commands
 
 ```bash
 cd backend
 
-# 1. One-time: create experiment tables + build the transcription FTS index
-#    (already run: 268 units indexed; documents #170 and #171 have no
-#     transcription and are reported as excluded)
+# 1. Build/refresh the chunk index (incremental; the production backfill)
+python scripts/reindex.py
+
+# 2. Ensure the experiment run-log tables exist (additive, safe to re-run)
 python scripts/migrate_experiment.py
+```
 
-# 2. Generate embeddings for both representations (re-runnable; skips
-#    unchanged texts, --force re-embeds everything)
-python scripts/generate_experiment_embeddings.py
-python scripts/generate_experiment_embeddings.py --representations modelled  # subset
+## Running the experiment
 
-# 3. Run the experiment
+```bash
+cd backend
+
+# Conditions A, B, C
 python experiment.py --queries ../experiments/queries.example.csv \
     --modes keyword_original semantic_original semantic_modelled \
     --top-k 10 --output ../experiments/results/
 
-# Include MODE D (add ANTHROPIC_API_KEY to .env; --no-generate logs retrieval only)
+# All four conditions (D = C's frozen ranking + evidence hydration + Claude;
+# requires ANTHROPIC_API_KEY; --no-generate logs retrieval + evidence only)
 python experiment.py --queries ../experiments/queries.example.csv \
     --modes keyword_original semantic_original semantic_modelled rag \
     --rag-retrieval-mode semantic_modelled --top-k 10 \
     --output ../experiments/results/
 
-# 4. Tests
+# Tests
 python -m pytest tests/test_experiment.py -v
 ```
 
@@ -85,17 +75,17 @@ python -m pytest tests/test_experiment.py -v
 
 Each run writes `experiments/results/<UTC timestamp>/`:
 
-- `results.json` — full structured record (queries, conditions, ranked results, errors, RAG answers).
-- `results.csv` — one row per (query × mode × rank) with doc_id, record_type, score, title, source_archive.
+- `results.json` — full structured record (queries, conditions, ranked results, discovery chunks, evidence, errors, RAG answers), stamped with `config_version`.
+- `results.csv` — one row per (query × mode × rank) with doc_id, record_type, score, title, source_archive, plus `config_version`, embedding provider/model, `index_schema_version`, and the discovery chunk (`discovery_chunk_id`, `discovery_representation_type`, `discovery_excerpt`).
 - `review.csv` — review sheet for manual coding: transcription excerpt per hit plus **blank** `human_relevance` (0–3), `human_interpretive_value` (0–3), `notes` columns. No relevance judgment is automated.
-- `rag_answers.md` — MODE D answers with validated citations.
+- `rag_answers.md` — MODE D answers with validated citations and the PRIMARY-SOURCE EVIDENCE chunks supplied per document.
 
 The same data is queryable in SQLite (`experiment_runs` joined to `experiment_results`), e.g. for cross-archive analysis: results retain `source_archive`, so you can measure when a Nelson-Atkins-framed question surfaces Cleveland or Harvard material.
 
 ## Known limitations
 
-- Documents #170 and #171 have no transcription: excluded from `keyword_original`/`semantic_original` (reported, never silent), still present in `semantic_modelled` via metadata, and flagged as metadata-only if retrieved into RAG context.
-- Long transcriptions are embedded as single vectors (BGE-M3 handles 8k tokens; longer texts are truncated by the model) and truncated at 6,000 chars per document in RAG context. Chunked embedding would be a separate, explicitly named condition.
-- `keyword_original` uses OR-of-terms BM25 rather than the production app's exact-phrase matching (which returns zero results for most multi-word research questions). This choice is itself part of the baseline's definition and is documented in `_escape_fts`.
+- Documents #170 and #171 have no transcription: absent from `keyword_original`/`semantic_original` (they have no transcription chunks), still discoverable in `semantic_modelled` via metadata, and explicitly flagged as metadata-only finding aids if retrieved into RAG context.
+- `keyword_original` uses OR-of-terms BM25 (the production chunk-keyword behaviour) rather than exact-phrase matching, which returns zero results for most multi-word research questions. This choice is part of the baseline's definition.
 - The corpus's period romanizations (e.g. "Chih-hua" vs. "Zhihua") mean lexical modes can miss documents a modern query targets — expected, and part of what the experiment measures.
 - Group representation prefers the group-level transcription, falling back to page concatenation in page order; group-level transcription quality inherits from ingestion.
+- Chunk-level ranking means a unit's rank reflects its best-matching chunk; per-chunk discovery excerpts in `results.csv` show exactly which passage produced each rank.

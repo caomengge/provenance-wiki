@@ -83,6 +83,7 @@ def main():
     from modules.db import get_db
     from modules.experiment_search import (
         run_retrieval, log_run, get_transcription_excerpt, ExperimentSearchError,
+        EXPERIMENT_CONFIG_VERSION,
     )
     from modules.experiment_rag import run_rag, ExperimentRagError
 
@@ -115,6 +116,8 @@ def main():
                             "mode": f"rag[{args.rag_retrieval_mode}]",
                             "status": "ok",
                             "retrieval": r["retrieval"],
+                            "evidence": r["evidence"],
+                            "config_version": r["config_version"],
                             "answer": r["answer"],
                             "citations": r["citations"],
                             "llm_model": r["llm_model"],
@@ -143,6 +146,8 @@ def main():
                                  "embedding_provider": outcome["embedding_provider"],
                                  "embedding_model": outcome["embedding_model"],
                                  "representation_type": outcome["representation_type"],
+                                 "index_schema_version": outcome["index_schema_version"],
+                                 "config_version": outcome["config_version"],
                                  "results": outcome["results"], "meta": outcome["meta"]}
                         print(f"{header}: {len(outcome['results'])} results")
                     except ExperimentSearchError as e:
@@ -159,6 +164,7 @@ def main():
         # ── Exports ──────────────────────────────────────────────────────────
         manifest = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "config_version": EXPERIMENT_CONFIG_VERSION,
             "queries_file": str(args.queries),
             "modes": args.modes,
             "top_k": args.top_k,
@@ -169,27 +175,40 @@ def main():
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
         flat_fields = ["query_id", "query", "query_type", "retrieval_mode", "status",
-                       "embedding_model", "representation_type", "rank", "doc_id",
-                       "record_type", "score", "title", "source_archive", "error"]
+                       "config_version", "embedding_provider", "embedding_model",
+                       "index_schema_version", "representation_type", "rank", "doc_id",
+                       "record_type", "score", "title", "source_archive",
+                       "discovery_chunk_id", "discovery_representation_type",
+                       "discovery_excerpt", "error"]
         with open(outdir / "results.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=flat_fields)
             w.writeheader()
             for run in all_runs:
+                retr = run.get("retrieval") or {}
                 base = {"query_id": run["query_id"], "query": run["query"],
                         "query_type": run["query_type"], "retrieval_mode": run["mode"],
                         "status": run["status"],
-                        "embedding_model": run.get("embedding_model") or
-                            (run.get("retrieval") or {}).get("embedding_model"),
-                        "representation_type": run.get("representation_type") or
-                            (run.get("retrieval") or {}).get("representation_type"),
+                        "config_version": run.get("config_version")
+                            or retr.get("config_version") or EXPERIMENT_CONFIG_VERSION,
+                        "embedding_provider": run.get("embedding_provider")
+                            or retr.get("embedding_provider"),
+                        "embedding_model": run.get("embedding_model")
+                            or retr.get("embedding_model"),
+                        "index_schema_version": run.get("index_schema_version")
+                            or retr.get("index_schema_version"),
+                        "representation_type": run.get("representation_type")
+                            or retr.get("representation_type"),
                         "error": run.get("error", "")}
-                results = run.get("results") or (run.get("retrieval") or {}).get("results") or []
+                results = run.get("results") or retr.get("results") or []
                 if not results:
                     w.writerow(base)
                 for r in results:
                     w.writerow({**base, "rank": r["rank"], "doc_id": r["doc_id"],
                                 "record_type": r["record_type"], "score": r["score"],
-                                "title": r["title"], "source_archive": r["source_archive"]})
+                                "title": r["title"], "source_archive": r["source_archive"],
+                                "discovery_chunk_id": r.get("chunk_id"),
+                                "discovery_representation_type": r.get("representation_type"),
+                                "discovery_excerpt": r.get("excerpt", "")})
 
         review_fields = ["query_id", "query", "query_type", "retrieval_mode", "rank",
                          "doc_id", "record_type", "source_archive", "title", "score",
@@ -220,11 +239,26 @@ def main():
             lines = ["# MODE D (RAG) answers\n"]
             for a in rag_answers:
                 lines.append(f"\n## Query {a['query_id']} ({a['query_type']}): {a['query']}\n")
-                lines.append(f"*Retrieval: {a['mode']} · LLM: {a['llm_model']} · "
+                lines.append(f"*Retrieval: {a['mode']} (frozen ranking) · "
+                             f"config: {a.get('config_version', '')} · "
+                             f"LLM: {a['llm_model']} · "
                              f"prompt: {a['prompt_template_version']}*\n")
                 lines.append(a["answer"])
                 cited = ", ".join(f"{c['record_type']} #{c['doc_id']}" for c in a["citations"])
                 lines.append(f"\n**Cited (validated against retrieved set):** {cited or 'none'}\n")
+                ev_lines = []
+                for e in a.get("evidence", []):
+                    if e["evidence_chunks"]:
+                        chunks = ", ".join(
+                            f"chunk {c['chunk_index']} ({c['method']})"
+                            for c in e["evidence_chunks"])
+                        ev_lines.append(f"- {e['record_type']} #{e['doc_id']}: {chunks}")
+                    else:
+                        ev_lines.append(f"- {e['record_type']} #{e['doc_id']}: "
+                                        "no transcription (finding aid only)")
+                if ev_lines:
+                    lines.append("\n**PRIMARY-SOURCE EVIDENCE supplied per document:**\n")
+                    lines.extend(ev_lines)
                 lines.append("\n---\n")
             (outdir / "rag_answers.md").write_text("\n".join(lines), encoding="utf-8")
 

@@ -1,183 +1,213 @@
 """
-experiment_search.py – Experimental retrieval modes for the DH experiment.
+experiment_search.py – Experimental retrieval conditions A/B/C for the DH
+experiment, running on the PRODUCTION chunk-level retrieval infrastructure
+(experiment configuration: chunked_retrieval_v1).
 
-MODE A  keyword_original   BM25 (FTS5) over PRIMARY-SOURCE transcriptions.
-MODE B  semantic_original   Neural embeddings of the transcription, cosine ranked.
-MODE C  semantic_modelled   Neural embeddings of a deterministic AI-generated
-                            representation (title/description/entities/
-                            transactions/tags — NO annotations, NO transcription).
+MODE A  keyword_original    BM25 (SQLite FTS5) over PRIMARY-SOURCE
+                            transcription chunks ONLY. No semantic search,
+                            no generated representations.
+MODE B  semantic_original   Voyage semantic similarity (production model,
+                            voyage-4 by default) over transcription chunks
+                            ONLY. No keyword retrieval, no generated
+                            representations.
+MODE C  semantic_modelled   Voyage semantic similarity over AI-GENERATED
+                            representation chunks ONLY (description,
+                            entities, transactions, tags, dates, source
+                            metadata — never the transcription, never
+                            researcher annotations). No keyword retrieval;
+                            transcription similarity is NOT used for
+                            corpus-level discovery.
 
-Methodological guarantees (see Research context):
-  - No silent fallback: semantic modes raise ExperimentSearchError on any
-    failure (missing embeddings, backend failure) instead of switching method.
-  - source_archive and record_type are preserved on every result.
-  - Units without transcription are excluded from original-text modes and
-    reported in result meta, never silently dropped.
-  - Researcher annotations are never used in retrieval.
-  - Every run can be logged to experiment_runs/experiment_results for
-    structured, reproducible analysis.
+Ranking: chunks are ranked by the condition's own scorer (BM25 magnitude or
+cosine similarity), then aggregated to retrieval units — a unit's rank is
+the rank of its best-scoring chunk. Grouped pages never surface
+individually (the production index has no chunks for them).
 
-This module is independent of modules/search.py: the production app is
-unchanged.
+Reuse: the candidate generators are the production functions
+retrieval.keyword_candidates / retrieval.semantic_candidates — this module
+adds NO separate retrieval architecture. The legacy experiment path
+(document_embeddings whole-unit vectors + experiment_transcription_fts) is
+no longer used; its data is preserved untouched.
+
+Methodological guarantees, unchanged:
+  - the identical original query goes to every condition; no query
+    rewriting or expansion anywhere;
+  - no silent fallback: semantic modes raise ExperimentSearchError on any
+    failure (missing chunks/embeddings, provider failure) instead of
+    switching method;
+  - source_archive and record_type are preserved on every result;
+  - researcher annotations never enter any representation;
+  - every run logs embedding provider/model, index schema version and
+    experiment configuration version, so results can be tied to the exact
+    retrieval architecture;
+  - retrieval results are logged before any RAG generation;
+  - no LLM judges retrieval relevance.
 """
 
 import json
 import logging
 import uuid
 
-from modules.embeddings import get_embedding_backend, cosine_similarity, EmbeddingError
-from modules.experiment_schema import (
-    ensure_experiment_schema,
-    rebuild_transcription_fts,
-)
+from modules.embeddings import EmbeddingError
+from modules.retrieval import keyword_candidates, semantic_candidates
+from modules.indexer import _active_backend_config
+from modules.experiment_schema import ensure_experiment_schema
 
 logger = logging.getLogger(__name__)
+
+EXPERIMENT_CONFIG_VERSION = "chunked_retrieval_v1"
 
 RETRIEVAL_MODES = ("keyword_original", "semantic_original", "semantic_modelled")
 
 MODE_REPRESENTATION = {
-    "keyword_original": "original",
-    "semantic_original": "original",
-    "semantic_modelled": "modelled",
+    "keyword_original": "transcription",
+    "semantic_original": "transcription",
+    "semantic_modelled": "generated",
 }
+
+# Accept the legacy vocabulary so old call sites/notes keep working.
+_REPRESENTATION_ALIASES = {
+    "original": "transcription", "transcription": "transcription",
+    "modelled": "generated", "generated": "generated",
+}
+
+EXCERPT_CHARS = 400          # stored discovery excerpt length
+_CHUNK_HEADROOM = 10         # chunk candidates fetched per requested unit
 
 
 class ExperimentSearchError(RuntimeError):
     """Raised when a retrieval condition cannot run. Never triggers fallback."""
 
 
-def _escape_fts(query: str) -> str:
+# ── Chunk → unit aggregation ─────────────────────────────────────────────────
+
+def _aggregate_units(chunk_hits: list[dict], top_k: int) -> list[dict]:
     """
-    Build an FTS5 query for the keyword baseline: ranked OR of the query
-    terms (classic BM25 ranked retrieval — documents matching more terms
-    rank higher). Deterministic; no stemming, no expansion.
-
-    Note this differs from production search.py, which does strict phrase
-    matching; phrase matching returns zero results for most multi-word
-    research questions and would misrepresent a conventional archive baseline.
+    Collapse a best-first chunk ranking into a retrieval-unit ranking:
+    a unit's rank is the rank of its best chunk. Each result records the
+    discovery chunk (id, representation type, excerpt, score) that put the
+    unit at that rank.
     """
-    clean = query.replace('"', " ").replace("'", " ").strip()
-    terms = [t for t in clean.split() if t]
-    if not terms:
-        return '""'
-    if len(terms) == 1:
-        return f'"{terms[0]}"*'
-    return " OR ".join(f'"{t}"' for t in terms)
+    seen, results = set(), []
+    for h in chunk_hits:
+        key = (h["record_type"], h["unit_id"])
+        if key in seen:
+            continue
+        seen.add(key)
+        text = h["text"] or ""
+        results.append({
+            "rank": len(results) + 1,
+            "doc_id": h["unit_id"],
+            "record_type": h["record_type"],
+            "score": round(float(h["score"]), 6),
+            "title": h["title"],
+            "source_archive": h["source_archive"],
+            "chunk_id": h["chunk_id"],
+            "representation_type": h["representation_type"],
+            "chunk_index": h["chunk_index"],
+            "excerpt": text[:EXCERPT_CHARS] + ("…" if len(text) > EXCERPT_CHARS else ""),
+        })
+        if len(results) >= top_k:
+            break
+    return results
 
 
-# ── MODE A: keyword over transcription ───────────────────────────────────────
+def _require_chunks(conn, representation_type: str) -> int:
+    n = conn.execute(
+        "SELECT COUNT(*) c FROM retrieval_chunks WHERE representation_type=?",
+        (representation_type,),
+    ).fetchone()["c"]
+    if n == 0:
+        raise ExperimentSearchError(
+            f"No {representation_type!r} chunks in the retrieval index. "
+            "Run `python scripts/reindex.py` first."
+        )
+    return n
+
+
+# ── MODE A: keyword over transcription chunks ────────────────────────────────
 
 def keyword_original(conn, query: str, top_k: int = 10) -> dict:
     """
-    BM25 lexical retrieval over the primary-source transcription index.
-    Represents the conventional digital-archive baseline.
+    BM25 lexical retrieval over primary-source transcription chunks — the
+    conventional digital-archive baseline. Uses the production
+    keyword_candidates() (ranked OR of the query terms, deterministic, no
+    stemming, no expansion) restricted to representation_type=
+    'transcription'; generated representations cannot produce a hit.
     """
     ensure_experiment_schema(conn)
+    n = _require_chunks(conn, "transcription")
 
-    n = conn.execute("SELECT COUNT(*) c FROM experiment_transcription_fts").fetchone()["c"]
-    if n == 0:
-        raise ExperimentSearchError(
-            "Transcription FTS index is empty. Run "
-            "`python scripts/migrate_experiment.py` (or rebuild_transcription_fts) first."
-        )
-
-    rows = conn.execute(
-        """SELECT unit_id, record_type, bm25(experiment_transcription_fts) AS score
-           FROM experiment_transcription_fts
-           WHERE experiment_transcription_fts MATCH ?
-           ORDER BY score LIMIT ?""",
-        (_escape_fts(query), top_k),
-    ).fetchall()
-
-    results = []
-    for rank, r in enumerate(rows, start=1):
-        meta = _unit_metadata(conn, int(r["unit_id"]), r["record_type"])
-        results.append({
-            "rank": rank,
-            "doc_id": int(r["unit_id"]),
-            "record_type": r["record_type"],
-            # bm25() returns negative-is-better; store positive magnitude
-            "score": abs(r["score"]),
-            "title": meta["title"],
-            "source_archive": meta["source_archive"],
-        })
+    hits = keyword_candidates(conn, query,
+                              limit=max(top_k * _CHUNK_HEADROOM, 100),
+                              representation_type="transcription")
+    results = _aggregate_units(hits, top_k)
 
     return {
         "mode": "keyword_original",
-        "representation_type": "original",
+        "query": query,
+        "representation_type": "transcription",
         "embedding_provider": None,
         "embedding_model": None,
+        "index_schema_version": _index_schema_version(),
+        "config_version": EXPERIMENT_CONFIG_VERSION,
         "results": results,
-        "meta": {"indexed_units": n, "scoring": "bm25 (abs value; lower raw bm25 = better)"},
+        "meta": {"indexed_chunks": n,
+                 "scoring": "bm25 (abs value; lower raw bm25 = better); "
+                            "unit rank = best chunk rank"},
     }
 
 
 # ── MODES B & C: semantic retrieval ──────────────────────────────────────────
 
-def semantic_search(conn, query: str, representation_type: str, top_k: int = 10,
-                    provider: str | None = None, model_name: str | None = None) -> dict:
+def semantic_search(conn, query: str, representation_type: str,
+                    top_k: int = 10, provider: str | None = None,
+                    model_name: str | None = None) -> dict:
     """
-    Cosine-similarity retrieval over stored neural embeddings of the given
-    representation ('original' → MODE B, 'modelled' → MODE C).
+    Cosine-similarity retrieval over stored chunk embeddings of exactly one
+    representation ('transcription' → MODE B, 'generated' → MODE C; the
+    legacy names 'original'/'modelled' are accepted as aliases).
 
-    Raises ExperimentSearchError if the backend fails or no embeddings exist
-    for this (model, representation). NO keyword fallback, by design.
+    Uses the production semantic_candidates() with the production embedding
+    model (Voyage voyage-4 by default). Raises ExperimentSearchError if the
+    provider fails or no embeddings exist — NO keyword fallback, by design.
     """
-    if representation_type not in ("original", "modelled"):
+    rep = _REPRESENTATION_ALIASES.get(representation_type)
+    if rep is None:
         raise ValueError(f"Bad representation_type: {representation_type}")
 
     ensure_experiment_schema(conn)
+    n = _require_chunks(conn, rep)
+    prov, model = _active_backend_config(provider, model_name)
 
     try:
-        backend = get_embedding_backend(provider, model_name)
-        q_vec = backend.embed_one(query)
+        hits = semantic_candidates(conn, query, rep,
+                                   limit=max(top_k * _CHUNK_HEADROOM, 100),
+                                   provider=prov, model_name=model)
     except EmbeddingError as e:
         raise ExperimentSearchError(
             f"Query embedding failed ({e}). Semantic retrieval cannot run; "
             "no fallback is performed by design."
         ) from e
-
-    rows = conn.execute(
-        """SELECT document_id, record_type, embedding_json
-           FROM document_embeddings
-           WHERE representation_type = ? AND model_name = ?""",
-        (representation_type, backend.model_name),
-    ).fetchall()
-
-    if not rows:
+    except RuntimeError as e:
         raise ExperimentSearchError(
-            f"No stored embeddings for representation={representation_type!r}, "
-            f"model={backend.model_name!r}. Run "
-            "`python scripts/generate_experiment_embeddings.py` first. "
-            "No fallback is performed by design."
-        )
+            f"{e} No fallback is performed by design."
+        ) from e
 
-    scored = []
-    for r in rows:
-        vec = json.loads(r["embedding_json"])
-        scored.append((cosine_similarity(q_vec, vec), int(r["document_id"]), r["record_type"]))
-    scored.sort(key=lambda t: (-t[0], t[2], t[1]))  # deterministic tie-break
+    results = _aggregate_units(hits, top_k)
 
-    results = []
-    for rank, (score, unit_id, record_type) in enumerate(scored[:top_k], start=1):
-        meta = _unit_metadata(conn, unit_id, record_type)
-        results.append({
-            "rank": rank,
-            "doc_id": unit_id,
-            "record_type": record_type,
-            "score": round(score, 6),
-            "title": meta["title"],
-            "source_archive": meta["source_archive"],
-        })
-
-    mode = "semantic_original" if representation_type == "original" else "semantic_modelled"
+    mode = "semantic_original" if rep == "transcription" else "semantic_modelled"
     return {
         "mode": mode,
-        "representation_type": representation_type,
-        "embedding_provider": backend.provider,
-        "embedding_model": backend.model_name,
+        "query": query,
+        "representation_type": rep,
+        "embedding_provider": prov,
+        "embedding_model": model,
+        "index_schema_version": _index_schema_version(),
+        "config_version": EXPERIMENT_CONFIG_VERSION,
         "results": results,
-        "meta": {"embedded_units": len(rows), "scoring": "cosine similarity"},
+        "meta": {"indexed_chunks": n,
+                 "scoring": "cosine similarity; unit rank = best chunk rank"},
     }
 
 
@@ -189,9 +219,9 @@ def run_retrieval(conn, query: str, mode: str, top_k: int = 10,
     if mode == "keyword_original":
         return keyword_original(conn, query, top_k)
     if mode == "semantic_original":
-        return semantic_search(conn, query, "original", top_k, provider, model_name)
+        return semantic_search(conn, query, "transcription", top_k, provider, model_name)
     if mode == "semantic_modelled":
-        return semantic_search(conn, query, "modelled", top_k, provider, model_name)
+        return semantic_search(conn, query, "generated", top_k, provider, model_name)
     raise ExperimentSearchError(f"Unknown retrieval mode: {mode!r}")
 
 
@@ -201,8 +231,9 @@ def log_run(conn, query: str, mode: str, top_k: int, outcome: dict | None,
             query_id: str | None = None, query_type: str | None = None,
             query_notes: str | None = None, error: str | None = None) -> int:
     """
-    Persist one (query × condition) run to experiment_runs/experiment_results.
-    `outcome` is the dict returned by run_retrieval, or None on failure.
+    Persist one (query × condition) run to experiment_runs/experiment_results,
+    including per-result discovery chunk metadata and the provider/model/
+    index-schema/config version identifying the exact retrieval setup.
     Returns the run row id.
     """
     ensure_experiment_schema(conn)
@@ -211,8 +242,8 @@ def log_run(conn, query: str, mode: str, top_k: int, outcome: dict | None,
         """INSERT INTO experiment_runs
            (run_uuid, query_id, query, query_type, query_notes, retrieval_mode,
             embedding_provider, embedding_model, representation_type, top_k,
-            status, error, meta_json)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            status, error, meta_json, index_schema_version, config_version)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (
             run_uuid, query_id, query, query_type, query_notes, mode,
             (outcome or {}).get("embedding_provider"),
@@ -222,6 +253,8 @@ def log_run(conn, query: str, mode: str, top_k: int, outcome: dict | None,
             "ok" if outcome is not None else "failed",
             error,
             json.dumps((outcome or {}).get("meta", {})),
+            (outcome or {}).get("index_schema_version", _index_schema_version()),
+            (outcome or {}).get("config_version", EXPERIMENT_CONFIG_VERSION),
         ),
     )
     run_id = cur.lastrowid
@@ -229,44 +262,27 @@ def log_run(conn, query: str, mode: str, top_k: int, outcome: dict | None,
         for r in outcome["results"]:
             conn.execute(
                 """INSERT INTO experiment_results
-                   (run_id, rank, doc_id, record_type, score, title, source_archive)
-                   VALUES (?,?,?,?,?,?,?)""",
+                   (run_id, rank, doc_id, record_type, score, title,
+                    source_archive, chunk_id, representation_type, excerpt)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (run_id, r["rank"], r["doc_id"], r["record_type"],
-                 r["score"], r["title"], r["source_archive"]),
+                 r["score"], r["title"], r["source_archive"],
+                 r.get("chunk_id"), r.get("representation_type"),
+                 r.get("excerpt")),
             )
     return run_id
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _unit_metadata(conn, unit_id: int, record_type: str) -> dict:
-    table = "documents" if record_type == "document" else "document_groups"
-    row = conn.execute(
-        f"SELECT title, source_archive FROM {table} WHERE id=?", (unit_id,)
-    ).fetchone()
-    if row is None:
-        return {"title": None, "source_archive": None}
-    return {"title": row["title"], "source_archive": row["source_archive"]}
+def _index_schema_version() -> int:
+    from config import INDEX_SCHEMA_VERSION
+    return INDEX_SCHEMA_VERSION
 
 
 def get_transcription_excerpt(conn, unit_id: int, record_type: str,
                               max_chars: int = 400) -> str:
     """First max_chars of the unit's primary-source transcription (for review CSVs)."""
-    from modules.experiment_schema import get_retrieval_units  # noqa: cyclic-safe
-    if record_type == "document":
-        row = conn.execute("SELECT transcription FROM documents WHERE id=?",
-                           (unit_id,)).fetchone()
-        text = (row["transcription"] or "") if row else ""
-    else:
-        row = conn.execute("SELECT transcription FROM document_groups WHERE id=?",
-                           (unit_id,)).fetchone()
-        text = (row["transcription"] or "") if row else ""
-        if not text:
-            pages = conn.execute(
-                """SELECT transcription FROM documents WHERE group_id=?
-                   ORDER BY COALESCE(page_number, id)""",
-                (unit_id,),
-            ).fetchall()
-            text = "\n".join((p["transcription"] or "") for p in pages)
-    text = " ".join(text.split())
+    from modules.representations import get_unit_transcription
+    text = " ".join(get_unit_transcription(conn, unit_id, record_type).split())
     return text[:max_chars] + ("…" if len(text) > max_chars else "")
