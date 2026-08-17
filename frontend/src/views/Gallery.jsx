@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
 import EntityCombobox from '../components/EntityCombobox'
@@ -11,29 +11,62 @@ const SORT_OPTIONS = [
   { value: 'title',         label: 'Title' },
 ]
 
+// Defaults; anything equal to these is left out of the URL so the address
+// bar stays clean until the researcher actually changes something.
+const DEFAULTS = {
+  view: 'grid', sort: 'created_at', order: 'desc', page: 1, perPage: 50,
+}
+
 export default function Gallery({ onStatsUpdate }) {
+  // The gallery's view state lives in the URL query string, so returning
+  // from a document (browser Back) restores the exact same sort, order,
+  // filters, page and layout — and any view can be bookmarked or shared.
+  const [searchParams, setSearchParams] = useSearchParams()
+
   const [docs, setDocs]               = useState([])
   const [total, setTotal]             = useState(0)
-  const [page, setPage]               = useState(1)
+  const [page, setPage]               = useState(() => Number(searchParams.get('page')) || DEFAULTS.page)
   const [loading, setLoading]         = useState(true)
-  const [view, setView]               = useState('grid')
-  const [sort, setSort]               = useState('created_at')
-  const [order, setOrder]             = useState('desc')
-  const [keyOnly, setKeyOnly]         = useState(false)
+  const [view, setView]               = useState(() => searchParams.get('view') || DEFAULTS.view)
+  const [sort, setSort]               = useState(() => searchParams.get('sort') || DEFAULTS.sort)
+  const [order, setOrder]             = useState(() => searchParams.get('order') || DEFAULTS.order)
+  const [keyOnly, setKeyOnly]         = useState(() => searchParams.get('key_evidence') === '1')
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [selectMode, setSelectMode]   = useState(false)
   const [exporting, setExporting]     = useState(false)
 
   // Filter options
   const [archives,      setArchives]      = useState([])
-  const [filterArchive, setFilterArchive] = useState('')
-  const [filterEntity,  setFilterEntity]  = useState('')
+  const [filterArchive, setFilterArchive] = useState(() => searchParams.get('archive') || '')
+  const [filterEntity,  setFilterEntity]  = useState(() => searchParams.get('entity_id') || '')
   const [mediums,       setMediums]       = useState([])
-  const [filterMedium,  setFilterMedium]  = useState('')
+  const [filterMedium,  setFilterMedium]  = useState(() => searchParams.get('medium') || '')
 
-  const [perPage, setPerPage] = useState(50)
+  const [perPage, setPerPage] = useState(() => {
+    const v = searchParams.get('per_page')
+    if (v === 'all') return 'all'
+    return Number(v) || DEFAULTS.perPage
+  })
 
   const navigate = useNavigate()
+
+  // Mirror the current view state back into the URL. `replace: true` means
+  // adjusting a filter doesn't pile up history entries — Back still returns
+  // to wherever the researcher came from, with this view intact.
+  useEffect(() => {
+    const next = {}
+    if (view !== DEFAULTS.view)       next.view         = view
+    if (sort !== DEFAULTS.sort)       next.sort         = sort
+    if (order !== DEFAULTS.order)     next.order        = order
+    if (page !== DEFAULTS.page)       next.page         = String(page)
+    if (perPage !== DEFAULTS.perPage) next.per_page     = String(perPage)
+    if (keyOnly)                      next.key_evidence = '1'
+    if (filterArchive)                next.archive      = filterArchive
+    if (filterEntity)                 next.entity_id    = String(filterEntity)
+    if (filterMedium)                 next.medium       = filterMedium
+    setSearchParams(next, { replace: true })
+  }, [view, sort, order, page, perPage, keyOnly, filterArchive, filterEntity,
+      filterMedium, setSearchParams])
 
   const load = useCallback(async () => {
     setLoading(true)
