@@ -13,9 +13,11 @@ bp = Blueprint("qa", __name__)
 @bp.route("/api/qa", methods=["POST"])
 def ask():
     from modules.qa import answer_question
-    from config import ANTHROPIC_API_KEY
+    from config import ANTHROPIC_API_KEY, QA_PROVIDER
 
-    if not ANTHROPIC_API_KEY:
+    # The Anthropic key is only required by the Claude generation backend;
+    # QA_PROVIDER=ollama answers locally without one.
+    if QA_PROVIDER == "claude" and not ANTHROPIC_API_KEY:
         return jsonify({"error": "ANTHROPIC_API_KEY is not set in .env"}), 500
 
     data     = request.get_json(silent=True) or {}

@@ -86,6 +86,33 @@ EMBED_BATCH_SIZE   = 64           # texts per embedding API call during indexing
 QA_CONTEXT_DOCS    = 15           # documents retrieved for RAG context
 QA_MAX_TOKENS      = 2048
 
+# Generation backend for the FINAL answer step only (EXPERIMENTAL).
+# Retrieval, evidence hydration, context construction, citation parsing and
+# the API response shape are identical for every provider — only the model
+# that writes the answer changes.
+#   "claude" (default) – Anthropic API; requires ANTHROPIC_API_KEY
+#   "ollama"           – local Ollama server; no Anthropic key required
+QA_PROVIDER = (os.getenv("QA_PROVIDER") or "claude").strip().lower()
+
+# ── Ollama (local Q&A generation backend) ─────────────────────────────────────
+OLLAMA_BASE_URL  = (os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434").rstrip("/")
+OLLAMA_QA_MODEL  = os.getenv("OLLAMA_QA_MODEL") or "qwen3:14b"
+# Seconds; local generation is slower than a hosted API.
+OLLAMA_QA_TIMEOUT = int(os.getenv("OLLAMA_QA_TIMEOUT", "300"))
+
+# Context window requested from Ollama. Ollama defaults to a small num_ctx and
+# SILENTLY TRUNCATES longer prompts, which would mean Claude and Ollama did not
+# actually see the same evidence. A full QA_CONTEXT_DOCS=15 context measures
+# ~21k tokens, so 32768 is the smallest power-of-two that fits it whole.
+# Measured: qwen3:14b at this num_ctx stays 100% on a 16 GB GPU (14 GB used).
+# modules/ollama_qa.py logs a warning if a prompt still risks truncation.
+OLLAMA_NUM_CTX   = int(os.getenv("OLLAMA_NUM_CTX", "32768"))
+
+# Thinking models (qwen3, …) are asked NOT to think, so the generation is
+# comparable to the non-extended-thinking Claude call and the token budget is
+# spent on the answer rather than on reasoning. Set True to let the model think.
+OLLAMA_QA_THINK  = os.getenv("OLLAMA_QA_THINK", "false").strip().lower() in ("1", "true", "yes", "on")
+
 # ── Flask ─────────────────────────────────────────────────────────────────────
 FLASK_HOST  = "0.0.0.0"
 FLASK_PORT  = int(os.getenv("FLASK_PORT", "5100"))  # 5100 avoids macOS AirPlay on 5000

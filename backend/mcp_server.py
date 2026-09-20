@@ -154,7 +154,7 @@ def main():
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict):
-        from config import ANTHROPIC_API_KEY
+        from config import ANTHROPIC_API_KEY, QA_PROVIDER
 
         if name == "search_provenance":
             from modules.search import search_documents
@@ -288,7 +288,8 @@ def main():
 
         elif name == "ask_question":
             from modules.qa import answer_question
-            if not ANTHROPIC_API_KEY:
+            # Only the Claude generation backend needs the Anthropic key.
+            if QA_PROVIDER == "claude" and not ANTHROPIC_API_KEY:
                 return [types.TextContent(type="text", text="ANTHROPIC_API_KEY not set.")]
 
             question = arguments.get("question", "")

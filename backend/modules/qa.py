@@ -24,13 +24,17 @@ Pipeline:
      flagged so no substantive historical claim rests on generated
      metadata alone.
   4. Pull matching transactions for the retrieved units.
-  5. Send to Claude with a system prompt that requires citation of
-     [Doc #N] / [Group #N] and forbids speculation beyond the evidence.
+  5. Send to the configured generator (config.QA_PROVIDER: "claude" —
+     the default — or "ollama") with a system prompt that requires
+     citation of [Doc #N] / [Group #N] and forbids speculation beyond the
+     evidence. The provider switch applies to this final generation step
+     ONLY: retrieval, hydration and the context built in steps 1–4 are
+     identical for every provider, so the generators are what differ.
   6. Return {answer, sources, retrieved_source_count, cited_source_count,
      source_count (= cited), citations, context_items,
-     retrieval} so the underlying documents can be inspected directly and
-     the frontend can later show both "why this document was found" and
-     "passage used as evidence". The legacy `confidence` field is
+     retrieval, generation} so the underlying documents can be inspected
+     directly and the frontend can later show both "why this document was
+     found" and "passage used as evidence". The legacy `confidence` field is
      DEPRECATED (always null): citation count is not a valid measure of
      evidentiary confidence.
 """
@@ -72,6 +76,9 @@ Based ONLY on the above documents, answer the following question:
 # Cap on transcription text per context block, so ~15 excerpts stay well
 # within the model context while remaining substantial evidence.
 MAX_EXCERPT_CHARS = 4000
+
+# Claude model used for the generation step (unchanged; previously inline).
+CLAUDE_QA_MODEL = "claude-sonnet-4-6"
 
 
 def _context_block(conn, unit: dict) -> str:
@@ -175,11 +182,19 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
                              evidence_chunks, has_transcription}],
             retrieval:     {mode, semantic_available, semantic_error,
                             fusion, provider, model},
+            generation:    {provider, model} — which LLM wrote the answer
+                           (additive; every pre-existing key is unchanged),
         }
     """
     from modules.db import get_db
     from modules.retrieval import hybrid_retrieve, hydrate_evidence
-    from config import QA_CONTEXT_DOCS, QA_MAX_TOKENS
+    from config import (QA_CONTEXT_DOCS, QA_MAX_TOKENS, QA_PROVIDER,
+                        OLLAMA_QA_MODEL)
+
+    generation_meta = {
+        "provider": QA_PROVIDER,
+        "model": OLLAMA_QA_MODEL if QA_PROVIDER == "ollama" else CLAUDE_QA_MODEL,
+    }
 
     with get_db() as conn:
         retrieval = hybrid_retrieve(conn, question, top_k=QA_CONTEXT_DOCS)
@@ -205,6 +220,7 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
                 "citations":    [],
                 "context_items": [],
                 "retrieval":    retrieval_meta,
+                "generation":   generation_meta,
             }
 
         # Evidence hydration: attach the most query-relevant transcription
@@ -253,19 +269,31 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
         question=question,
     )
 
+    # ── Generation ────────────────────────────────────────────────────────
+    # Everything above this point (retrieval, hydration, context building,
+    # transactions) is provider-independent: both backends receive exactly the
+    # same QA_SYSTEM_PROMPT and the same `context` string built above.
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=QA_MAX_TOKENS,
-            system=QA_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": context}],
-        )
-        answer_text = response.content[0].text.strip()
+        if QA_PROVIDER == "ollama":
+            from modules.ollama_qa import generate as ollama_generate
+            answer_text = ollama_generate(QA_SYSTEM_PROMPT, context)
+        elif QA_PROVIDER == "claude":
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model=CLAUDE_QA_MODEL,
+                max_tokens=QA_MAX_TOKENS,
+                system=QA_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": context}],
+            )
+            answer_text = response.content[0].text.strip()
+        else:
+            raise ValueError(
+                f"Unknown QA_PROVIDER {QA_PROVIDER!r} — expected 'claude' or 'ollama'")
     except Exception as exc:
-        logger.exception("Claude Q&A failed")
+        logger.exception("Q&A generation failed (provider=%s)", QA_PROVIDER)
+        label = "Ollama" if QA_PROVIDER == "ollama" else "Claude API"
         return {
-            "answer":       f"Error calling Claude API: {exc}",
+            "answer":       f"Error calling {label}: {exc}",
             "sources":      [{"id": u["unit_id"], "record_type": u["record_type"]}
                              for u in units],
             # units were retrieved, but no answer (and so no citations)
@@ -277,6 +305,7 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
             "citations":    [],
             "context_items": [_context_item_meta(u) for u in units],
             "retrieval":    retrieval_meta,
+            "generation":   generation_meta,
         }
 
     # Extract cited IDs, keeping doc/group namespaces distinct.
@@ -321,4 +350,7 @@ def answer_question(question: str, api_key: str) -> dict[str, Any]:
         "citations":    citations,
         "context_items": [_context_item_meta(u) for u in units],
         "retrieval":    retrieval_meta,
+        # Which generator wrote this answer. Additive: no pre-existing field
+        # changes, so the frontend stays compatible.
+        "generation":   generation_meta,
     }
