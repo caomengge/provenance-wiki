@@ -233,14 +233,16 @@ def install():
     subprocess.Popen(["open", str(APP)])
     time.sleep(8)
     log("after first open: " + window_summary())
-    dlg = find_win(lambda w: w["owner"] == "CoreServicesUIAgent", 5)
+    # Wait past the "Verifying…" bar for the real dialog (much taller)
+    dlg = find_win(lambda w: w["owner"] == "CoreServicesUIAgent" and w["box"][3] - w["box"][1] > 150, 40)
+    time.sleep(1)
     shot("gatekeeper", {"dialog": dlg["box"] if dlg else None})
     if dlg:
         b = dlg["box"]
         w, h = b[2] - b[0], b[3] - b[1]
         click(b[0] + 0.27 * w, b[1] + 0.885 * h)          # "Done"
         time.sleep(2)
-        still = find_win(lambda w: w["owner"] == "CoreServicesUIAgent", 1)
+        still = find_win(lambda w: w["owner"] == "CoreServicesUIAgent" and w["box"][3] - w["box"][1] > 150, 1)
         log(f"clicked Done: dialog {'still open' if still else 'closed'}")
         if still:
             sh("pkill", "-x", "CoreServicesUIAgent")
@@ -252,9 +254,9 @@ def install():
     shot("settings", {"window": sw["box"] if sw else None})
     if sw:
         b = sw["box"]
-        for _ in range(3):
-            scroll((b[0] + b[2]) * 0.62, (b[1] + b[3]) / 2, 25)
-            time.sleep(1)
+        for _ in range(12):
+            scroll(b[0] + (b[2] - b[0]) * 0.65, (b[1] + b[3]) / 2, 30)
+            time.sleep(0.6)
         time.sleep(1.5)
         shot("settings_scrolled", {"window": sw["box"]})
     sh("pkill", "-x", "System Settings")
