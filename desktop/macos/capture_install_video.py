@@ -262,8 +262,18 @@ def install():
     # Let the app open for the rest of the video (the Open Anyway approval can't be
     # given on CI: it needs the Mac password), and keep it from opening a browser.
     sh("xattr", "-dr", "com.apple.quarantine", str(APP))
-    sh("launchctl", "setenv", "PW_NO_BROWSER", "1")
-    subprocess.Popen(["open", str(APP)])
+    # The first-open dialog can't be clicked on CI (no accessibility access):
+    # stop the waiting `open` and the dialog, then start the app directly.
+    sh("pkill", "-f", f"open {APP}")
+    for _ in range(5):
+        sh("pkill", "-9", "-x", "CoreServicesUIAgent")
+        time.sleep(1.5)
+        if not find_win(lambda w: w["owner"] == "CoreServicesUIAgent", 1):
+            break
+    log("before app start: " + window_summary())
+    env = dict(os.environ, PW_NO_BROWSER="1")
+    subprocess.Popen([str(APP / "Contents" / "MacOS" / "ProvenanceWiki")], env=env,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 # ── 2. The app in Chrome ─────────────────────────────────────────────────────
