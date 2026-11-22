@@ -11,7 +11,7 @@ name: Desktop build (Windows, testing-only)
 on:
   workflow_dispatch:
   push:
-    branches: [main, build/windows-installer, fix/windows-folder-picker]
+    branches: [main, build/windows-installer]
     paths:
       - backend/**
       - frontend/**
