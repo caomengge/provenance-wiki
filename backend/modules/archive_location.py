@@ -831,7 +831,7 @@ def _win_browse_for_folder(prompt: str) -> str | None:
 
     callback = BFFCALLBACK(on_event)                       # keep a reference
     display = ctypes.create_unicode_buffer(260)
-    info = BROWSEINFOW(None, None, display, prompt,
+    info = BROWSEINFOW(None, None, ctypes.cast(display, wt.LPWSTR), prompt,
                        BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX, callback, 0, 0)
     shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
     shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wt.LPWSTR]
@@ -885,7 +885,8 @@ def choose_folder(prompt: str) -> str | None:
     if IS_WIN:
         try:
             return _win_browse_for_folder(prompt)
-        except OSError as exc:
+        except Exception as exc:             # never leave the screen without a way forward
+            logger.exception("Windows folder dialog failed")
             raise PickerUnavailable(str(exc))
     if shutil.which("zenity"):
         code, out, _err = _run_picker(["zenity", "--file-selection", "--directory", f"--title={prompt}"])
