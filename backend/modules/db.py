@@ -470,18 +470,9 @@ def init_db():
         # rows bloat the table without adding value. Safe to re-run.
         _migrate(conn, "DELETE FROM ingest_run_files WHERE status='skipped'")
 
-        # Sweep any pre-existing orphan entities and tags left behind by
-        # deletions that occurred before the cleanup logic was added.
-        conn.execute("""
-            DELETE FROM entities
-            WHERE id NOT IN (SELECT entity_id FROM document_entities)
-              AND id NOT IN (SELECT entity_id FROM group_entities)
-        """)
-        conn.execute("""
-            DELETE FROM tags
-            WHERE id NOT IN (SELECT tag_id FROM document_tags)
-              AND id NOT IN (SELECT tag_id FROM group_tags)
-        """)
+        # No automatic deletion of unused entities or tags at startup: that
+        # silently removed curated aliases and relationships. Cleanup is a
+        # user action on the Entities page (modules/maintenance.py).
     return True
 
 

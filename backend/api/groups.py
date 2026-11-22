@@ -449,18 +449,8 @@ def delete_group(group_id):
         # group_entities, group_transactions, and group_tags.
         conn.execute("DELETE FROM document_groups WHERE id=?", (group_id,))
 
-        # Clean up entities and tags that are no longer referenced by any
-        # document or group (orphans from this deletion).
-        conn.execute("""
-            DELETE FROM entities
-            WHERE id NOT IN (SELECT entity_id FROM document_entities)
-              AND id NOT IN (SELECT entity_id FROM group_entities)
-        """)
-        conn.execute("""
-            DELETE FROM tags
-            WHERE id NOT IN (SELECT tag_id FROM document_tags)
-              AND id NOT IN (SELECT tag_id FROM group_tags)
-        """)
+        # Entities and tags left unused are kept; the researcher removes them with
+        # "Clean up unused" on the Entities page (modules/maintenance.py).
 
     # Retrieval index: the group unit disappears; its pages become
     # standalone retrieval units again (incremental).
@@ -531,12 +521,7 @@ def remove_group_entity(group_id, entity_id):
         from modules.db import record_audit
         record_audit(conn, entity_type="group", entity_id=group_id, action="remove_entity",
                      old={"entity_id": entity_id, "name": ent_name["name"] if ent_name else None})
-        conn.execute(
-            """DELETE FROM entities WHERE id=?
-               AND id NOT IN (SELECT entity_id FROM document_entities)
-               AND id NOT IN (SELECT entity_id FROM group_entities)""",
-            (entity_id,),
-        )
+        # The entity itself is kept even if now unused (see modules/maintenance.py).
 
     from modules.indexer import reindex_unit_safe
     reindex_unit_safe(group_id, "group")

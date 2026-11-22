@@ -116,6 +116,13 @@ const api = {
   removeEntityAlias: (id, aliasId) =>
     request('DELETE', `/api/entities/${id}/aliases/${aliasId}`),
 
+  // Unused entities/tags are kept until the researcher reviews and removes them.
+  getUnused: () =>
+    request('GET', '/api/maintenance/unused'),
+
+  cleanupUnused: (entityIds, tagIds) =>
+    request('POST', '/api/maintenance/cleanup-unused', { entity_ids: entityIds, tag_ids: tagIds }),
+
   // ── Search ───────────────────────────────────────────────────────────────
   search: (params = {}) => {
     // URLSearchParams stringifies array values as comma-joined; the search
