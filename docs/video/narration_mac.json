@@ -1,0 +1,131 @@
+{
+ "voice": "af_heart",
+ "speed": 0.92,
+ "scenes": [
+  {
+   "id": "intro",
+   "caption": "Installing Provenance Wiki on a Mac",
+   "say": "This video shows you how to install Provenance Wiki on a Mac. It takes about ten minutes, and you don't need any technical knowledge. You can pause the video at any time."
+  },
+  {
+   "id": "need",
+   "caption": "You need: a Mac with Apple silicon, the disk image, test photos and two API keys",
+   "say": "Before you start, you need a Mac with Apple silicon, running mac O S fifteen, Sequoia, or later. You also need the Provenance Wiki disk image file, a few photographs of test documents, and two A P I keys: one from Anthropic, and one from Voyage A I. The tester instructions explain where to get them."
+  },
+  {
+   "id": "download",
+   "caption": "Download the .dmg file from the shared folder",
+   "say": "First, download the file ending in dot D M G from the shared folder. If your browser asks whether to allow the download, click Allow."
+  },
+  {
+   "id": "downloads",
+   "caption": "Open your Downloads folder and double-click the .dmg file",
+   "say": "When the download has finished, open your Downloads folder, and double-click the D M G file."
+  },
+  {
+   "id": "dmg",
+   "caption": "Drag Provenance Wiki (Testing) onto the Applications folder",
+   "say": "A window opens. Drag Provenance Wiki Testing onto the Applications folder in the same window. This copies the app to your Mac."
+  },
+  {
+   "id": "applications",
+   "caption": "Open Applications and double-click Provenance Wiki (Testing)",
+   "say": "Now open your Applications folder, and double-click Provenance Wiki Testing."
+  },
+  {
+   "id": "gatekeeper",
+   "caption": "“Not Opened”: click Done. Do not click Move to Trash",
+   "say": "The first time, mac O S says it could not verify the app. That's expected, because this testing version isn't signed by Apple yet. Click Done. Do not click Move to Trash."
+  },
+  {
+   "id": "settings",
+   "caption": "System Settings → Privacy & Security → Open Anyway",
+   "say": "Open System Settings, and choose Privacy and Security. Scroll down to the message about Provenance Wiki Testing, and click Open Anyway."
+  },
+  {
+   "id": "password",
+   "caption": "Enter your Mac password, then click Open Anyway again",
+   "say": "If you're asked, enter your Mac password, then click Open Anyway again. You only do this once for each version. After that, it opens like any other app."
+  },
+  {
+   "id": "welcome",
+   "caption": "Provenance Wiki opens in your web browser, on your own computer",
+   "say": "Provenance Wiki opens in your web browser. It runs on your own computer, not on a website. The welcome page has four steps."
+  },
+  {
+   "id": "archive_create",
+   "caption": "Step 1: Click “Create my archive here”",
+   "say": "Step one: where to store your archive. The suggested folder is fine for most people. Click Create my archive here."
+  },
+  {
+   "id": "archive_other",
+   "caption": "Short on space? Choose “Choose another folder” and pick a larger drive",
+   "say": "If your Mac's drive is nearly full, choose Choose another folder instead, and pick a folder on a larger or external drive. Avoid folders that sync to the cloud, like iCloud Drive or Dropbox."
+  },
+  {
+   "id": "archive_done",
+   "caption": "Your archive is ready",
+   "say": "Your archive is now set up. It shows where it's stored, and how much space is free."
+  },
+  {
+   "id": "keys_paste",
+   "caption": "Step 2: Paste your Anthropic key and click Save. Then do the same for Voyage AI",
+   "say": "Step two: your A P I keys. Copy your Anthropic key, paste it into the first box, and click Save. Then do the same for your Voyage A I key, in the second box."
+  },
+  {
+   "id": "keys_test",
+   "caption": "Click “Test connection” to check each key",
+   "say": "Each key now shows Saved. Click Test connection to check that it works. Your keys are kept in your Mac's Keychain, not in a file."
+  },
+  {
+   "id": "step3",
+   "caption": "Step 3: Read what leaves your computer",
+   "say": "Step three explains what information leaves your computer. Please read it before you add any confidential material."
+  },
+  {
+   "id": "step4_open",
+   "caption": "Step 4: Click “Open photos folder”",
+   "say": "Step four: add your photos. Click Open photos folder."
+  },
+  {
+   "id": "photos_folder",
+   "caption": "Copy your photographs into this folder (JPEG, PNG, TIFF or WebP)",
+   "say": "A Finder window opens. Copy your photographs into it. They can be jay peg, P N G, tiff, or web P files, with one photograph per page. iPhone photos in H E I C format need to be exported as jay peg first."
+  },
+  {
+   "id": "check_again",
+   "caption": "Click “I’ve added photos: check again”",
+   "say": "Back in your browser, click: I've added photos, check again. It shows how many new photographs are ready."
+  },
+  {
+   "id": "source",
+   "caption": "Don’t forget the Source: where these documents come from (required)",
+   "say": "Now fill in the Source: the archive or collection these documents come from. Don't skip this. It's required, and it's saved with every document, so you can cite it later."
+  },
+  {
+   "id": "ingest",
+   "caption": "Click “Ingest Photos”. When it’s done, open the Gallery",
+   "say": "Click Ingest Photos. Each photograph is read by Anthropic, so this can take a little while. When it's done, open the Gallery to see your documents."
+  },
+  {
+   "id": "menubar",
+   "caption": "Find the P icon in the menu bar, at the top right of your screen",
+   "say": "A small P icon appears in the menu bar, at the top right of your screen."
+  },
+  {
+   "id": "menu",
+   "caption": "Click it to reopen the app, open your photos, or Quit",
+   "say": "Click it to open Provenance Wiki again, open your photos folder, or quit. Closing the browser tab doesn't stop the app. To stop it, choose Quit."
+  },
+  {
+   "id": "reopen",
+   "caption": "Next time, open it from Applications or Launchpad",
+   "say": "Next time, open Provenance Wiki from your Applications folder or from Launchpad, like any other app."
+  },
+  {
+   "id": "outro",
+   "caption": "Something went wrong? Send us a screenshot and a short note",
+   "say": "That's it. If anything goes wrong, take a screenshot, and send it to us with a short note. Thank you for testing Provenance Wiki."
+  }
+ ]
+}

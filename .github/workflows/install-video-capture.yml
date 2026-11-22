@@ -10,7 +10,8 @@ on:
   push:
     branches: [docs/install-video]
     paths:
-      - docs/video/**
+      - docs/video/narration.json
+      - docs/video/make_narration.py
       - desktop/windows/capture_install_video.py
       - .github/workflows/install-video-capture.yml
 
