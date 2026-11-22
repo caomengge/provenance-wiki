@@ -24,42 +24,80 @@ ROOT_DIR = Path(__file__).parent.parent
 
 
 def user_data_dir() -> Path:
-    """Per-user folder for the archive in packaged mode (PW_DATA_DIR overrides)."""
+    """Default per-user archive folder in packaged mode (kept for compatibility)."""
     override = os.getenv("PW_DATA_DIR")
     if override:
         return Path(override).expanduser()
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "ProvenanceWiki"
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "ProvenanceWiki"
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
-    return Path(base) / "provenance-wiki"
+    from modules.archive_location import default_archive_dir
+    return default_archive_dir()
 
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
+# Packaged mode: ONE archive folder holds the database, photos, thumbnails,
+# backups and logs, wherever the researcher chose (modules/archive_location.py,
+# spec: specs/archive-location.md). A small fixed config folder records where.
+#
+# ARCHIVE_STATE: "ok" | "setup" (first launch, nothing created yet) |
+#                "missing" (e.g. external drive unplugged) | "moving"
+ARCHIVE_STATE    = "ok"
+ARCHIVE_EXPECTED = None        # where a missing archive was last seen
+ARCHIVE_LISTENERS = []         # callables run after the archive folder changes
+
 if PACKAGED:
     # Bundled, read-only resources (PyInstaller unpacks/points here).
     RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", ROOT_DIR))
     DIST_DIR     = RESOURCE_DIR / "dist"
-    DATA_DIR     = user_data_dir()
-    PHOTOS_DIR   = DATA_DIR / "photos"
-    if sys.platform == "darwin" and not os.getenv("PW_DATA_DIR"):
-        LOG_DIR = Path.home() / "Library" / "Logs" / "ProvenanceWiki"
-    else:
-        LOG_DIR = DATA_DIR / "logs"
+    from modules import archive_location as _archive_location
+    CONFIG_DIR   = _archive_location.config_dir()
+    _resolved    = _archive_location.resolve()
+    ARCHIVE_STATE    = _resolved["state"]
+    ARCHIVE_EXPECTED = _resolved["expected"]
+    # Without an open archive, nothing may be written anywhere but CONFIG_DIR.
+    DATA_DIR     = _resolved["path"] or (CONFIG_DIR / "no-archive")
     # No .env in packaged mode: keys come from the OS credential store.
 else:
     load_dotenv(ROOT_DIR / ".env")
     RESOURCE_DIR = ROOT_DIR
-    DATA_DIR     = ROOT_DIR / "data"
-    PHOTOS_DIR   = ROOT_DIR / "photos"
     DIST_DIR     = ROOT_DIR / "dist"
-    LOG_DIR      = DATA_DIR / "logs"
+    DATA_DIR     = ROOT_DIR / "data"
+    CONFIG_DIR   = DATA_DIR
 
-THUMBNAILS_DIR = DATA_DIR / "thumbnails"
-BACKUP_DIR     = DATA_DIR / "backups"
-DB_PATH        = DATA_DIR / "provenance.db"
+
+def _archive_paths(data_dir: Path) -> dict:
+    data_dir = Path(data_dir)
+    return {
+        "DATA_DIR":       data_dir,
+        "PHOTOS_DIR":     data_dir / "photos" if PACKAGED else ROOT_DIR / "photos",
+        "THUMBNAILS_DIR": data_dir / "thumbnails",
+        "BACKUP_DIR":     data_dir / "backups",
+        "DB_PATH":        data_dir / "provenance.db",
+        "LOG_DIR":        data_dir / "logs" if (ARCHIVE_STATE == "ok" or not PACKAGED)
+                          else CONFIG_DIR / "logs",
+    }
+
+
+globals().update(_archive_paths(DATA_DIR))
+
+
+def _ensure_archive_dirs() -> None:
+    for d in (DATA_DIR, THUMBNAILS_DIR, LOG_DIR) + ((PHOTOS_DIR,) if PACKAGED else ()):
+        Path(d).mkdir(parents=True, exist_ok=True)
+
+
+def apply_archive(data_dir) -> None:
+    """Point the running app at an archive folder (first-run setup, locate,
+    or after a move). Every module reads these paths at call time."""
+    global ARCHIVE_STATE, ARCHIVE_EXPECTED
+    ARCHIVE_STATE = "ok"
+    ARCHIVE_EXPECTED = None
+    globals().update(_archive_paths(data_dir))
+    _ensure_archive_dirs()
+    for listener in list(ARCHIVE_LISTENERS):
+        try:
+            listener()
+        except Exception:
+            pass
+
 
 # ── Thumbnails ────────────────────────────────────────────────────────────────
 THUMBNAIL_MAX_DIM = 480           # longest edge in pixels for cached thumbnails
@@ -157,8 +195,9 @@ FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 # ── MCP ───────────────────────────────────────────────────────────────────────
 MCP_PORT = 5001
 
-# Ensure data directories exist
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
-if PACKAGED:
-    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure data directories exist (only when an archive is open: in setup or
+# missing state nothing is created outside the config folder)
+if ARCHIVE_STATE == "ok":
+    _ensure_archive_dirs()
+else:
+    Path(LOG_DIR).mkdir(parents=True, exist_ok=True)

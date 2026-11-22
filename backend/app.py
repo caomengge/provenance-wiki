@@ -26,6 +26,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class _SkipInit(Exception):
+    pass
+
+
 def create_app() -> Flask:
     """Create and configure the Flask application."""
     from config import DIST_DIR, FLASK_DEBUG
@@ -37,11 +41,36 @@ def create_app() -> Flask:
     from modules.local_security import install_local_guard
     install_local_guard(app)
 
+    # While no archive is open (first launch, archive drive missing, or a move
+    # in progress) only settings/archive/system routes answer; nothing else may
+    # touch the database. Registered after the local-security guard.
+    @app.before_request
+    def _require_open_archive():
+        import config
+        from flask import request as _rq
+        if config.ARCHIVE_STATE == "ok" or not _rq.path.startswith("/api/"):
+            return None
+        if _rq.path.startswith(("/api/health", "/api/settings", "/api/archive", "/api/system")):
+            return None
+        messages = {
+            "setup": "Choose where to store your archive first (Settings).",
+            "missing": "Your archive can't be found. Reconnect its drive or locate it.",
+            "moving": "Your archive is being moved. This is paused until the move finishes.",
+        }
+        return jsonify({"error": messages.get(config.ARCHIVE_STATE, "Archive unavailable"),
+                        "archive_state": config.ARCHIVE_STATE}), 409
+
     # ── Initialise database ───────────────────────────────────────────────────
     from modules.db import init_db
+    import config as _config
     try:
+        if _config.ARCHIVE_STATE != "ok":
+            logger.info("No archive open (state=%s); database not initialised", _config.ARCHIVE_STATE)
+            raise _SkipInit()
         init_db()
         logger.info("Database initialised")
+    except _SkipInit:
+        pass
     except Exception as exc:
         logger.error("Failed to initialise database: %s", exc)
 
@@ -57,10 +86,11 @@ def create_app() -> Flask:
     from api.groups          import bp as groups_bp
     from api.transactions    import bp as transactions_bp
     from api.settings_routes import bp as settings_bp
+    from api.archive_routes  import bp as archive_bp
 
     for bp in [docs_bp, entities_bp, search_bp, ingest_bp,
                timeline_bp, network_bp, qa_bp, export_bp, groups_bp, transactions_bp,
-               settings_bp]:
+               settings_bp, archive_bp]:
         app.register_blueprint(bp)
 
     # ── Stats endpoint ────────────────────────────────────────────────────────
@@ -156,8 +186,10 @@ def create_app() -> Flask:
     def health():
         # Booleans only — never return any part of a key.
         from config import ANTHROPIC_API_KEY, VOYAGE_API_KEY, APP_VERSION, PACKAGED, TESTING_BUILD
+        import config
         return jsonify({
             "status": "ok",
+            "archive_state": config.ARCHIVE_STATE,
             "app": "provenance-wiki",      # lets the desktop launcher recognise its own server
             "version": APP_VERSION,
             "packaged": PACKAGED,

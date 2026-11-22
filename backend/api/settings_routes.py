@@ -39,9 +39,10 @@ def _settings_payload() -> dict:
         "keys": secrets_store.status(),
         "secure_store_available": secrets_store.store_available(),
         "secure_store_name": secrets_store.store_name(),
+        "archive_state": config.ARCHIVE_STATE,
         "folders": {
-            "data": str(config.DATA_DIR),
-            "photos": str(config.PHOTOS_DIR),
+            "data": str(config.DATA_DIR) if config.ARCHIVE_STATE == "ok" else None,
+            "photos": str(config.PHOTOS_DIR) if config.ARCHIVE_STATE == "ok" else None,
             "logs": str(config.LOG_DIR),
         },
     }
@@ -133,6 +134,8 @@ def open_folder():
     folders = {"data": config.DATA_DIR, "photos": config.PHOTOS_DIR, "logs": config.LOG_DIR}
     if which not in folders:
         return jsonify({"error": "Unknown folder"}), 400
+    if which != "logs" and config.ARCHIVE_STATE != "ok":
+        return jsonify({"error": "No archive is open."}), 409
     path = folders[which]
     path.mkdir(parents=True, exist_ok=True)
     try:
