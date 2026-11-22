@@ -1,7 +1,7 @@
 """
 app.py – Flask application factory for Provenance Archive Wiki.
 
-Registers all API blueprints, configures CORS, serves the React SPA
+Registers all API blueprints, applies local-only request checks, serves the React SPA
 from /dist, and initialises the database on first run.
 
 Usage:
@@ -18,7 +18,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from flask import Flask, send_from_directory, jsonify
-from flask_cors import CORS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,8 +32,10 @@ def create_app() -> Flask:
 
     app = Flask(__name__, static_folder=str(DIST_DIR), static_url_path="")
 
-    # Allow cross-origin requests from the Vite dev server during development
-    CORS(app, resources={r"/api/*": {"origins": "*"}})
+    # Local-only request checks (Host, Origin, X-Provenance-Wiki header).
+    # No CORS: the built UI is same-origin and the Vite dev server proxies /api.
+    from modules.local_security import install_local_guard
+    install_local_guard(app)
 
     # ── Initialise database ───────────────────────────────────────────────────
     from modules.db import init_db
@@ -193,5 +194,10 @@ app = create_app()
 
 if __name__ == "__main__":
     from config import FLASK_HOST, FLASK_PORT, FLASK_DEBUG
+    from modules.local_security import is_loopback_bind
+    if not is_loopback_bind(FLASK_HOST):
+        logger.warning("FLASK_HOST=%s exposes this archive to other computers on the "
+                       "network with no login. Use 127.0.0.1 unless you intend this.",
+                       FLASK_HOST)
     logger.info("Starting Provenance Archive Wiki on http://%s:%s", FLASK_HOST, FLASK_PORT)
     app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG, threaded=True)
