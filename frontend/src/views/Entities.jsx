@@ -13,6 +13,88 @@ const TYPE_COLORS = {
 
 const ENTITY_TYPES = ['person', 'object', 'institution', 'place', 'unknown']
 
+// Reviews and removes entities/tags attached to no document or group
+// (including documents in the Trash). Nothing is removed automatically.
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`
+
+function CleanupUnusedPanel({ onDone }) {
+  const [state, setState] = useState('idle')   // idle | loading | review | removing | done | error
+  const [unused, setUnused] = useState(null)
+  const [message, setMessage] = useState('')
+
+  const open = async () => {
+    setState('loading')
+    try {
+      setUnused(await api.getUnused())
+      setState('review')
+    } catch (err) {
+      setMessage(err.message); setState('error')
+    }
+  }
+
+  const remove = async () => {
+    setState('removing')
+    try {
+      const res = await api.cleanupUnused(unused.entities.map(e => e.id), unused.tags.map(t => t.id))
+      setMessage(`Removed ${plural(res.removed_entities, 'entity', 'entities')} and ${plural(res.removed_tags, 'tag', 'tags')}.`)
+      setState('done')
+      onDone()
+    } catch (err) {
+      setMessage(err.message); setState('error')
+    }
+  }
+
+  const small = { fontSize: '0.82rem', padding: '0.25rem 0.6rem' }
+
+  if (state === 'idle' || state === 'loading') {
+    return (
+      <button className="btn btn-ghost" style={small} onClick={open} disabled={state === 'loading'}>
+        {state === 'loading' ? 'Checking…' : 'Clean up unused…'}
+      </button>
+    )
+  }
+
+  const total = unused ? unused.entities.length + unused.tags.length : 0
+  const box = {
+    border: '1px solid var(--border)', borderRadius: '4px', padding: '0.9rem 1rem',
+    margin: '0 0 1.25rem', background: 'var(--cream-light)', fontSize: '0.86rem',
+  }
+
+  if (state === 'done' || state === 'error' || total === 0) {
+    return (
+      <div style={box}>
+        <span>{state === 'review' ? 'Nothing to clean up: every entity and tag is attached to at least one document or group.' : message}</span>
+        <button className="btn btn-ghost" style={{ ...small, marginLeft: '0.75rem' }} onClick={() => setState('idle')}>Close</button>
+      </div>
+    )
+  }
+
+  const names = (items) => {
+    const shown = items.slice(0, 12).map(i => i.name).join(', ')
+    return items.length > 12 ? `${shown}, and ${items.length - 12} more` : shown
+  }
+
+  return (
+    <div style={box}>
+      <p style={{ margin: '0 0 0.5rem', fontWeight: 600 }}>
+        {plural(unused.entities.length, 'entity', 'entities')} and {plural(unused.tags.length, 'tag', 'tags')} {total === 1 ? 'is' : 'are'} not attached to any document or group, including documents in the Trash.
+      </p>
+      {unused.entities.length > 0 && <p style={{ margin: '0 0 0.35rem' }}><em>Entities:</em> {names(unused.entities)}</p>}
+      {unused.tags.length > 0 && <p style={{ margin: '0 0 0.35rem' }}><em>Tags:</em> {names(unused.tags)}</p>}
+      <p style={{ margin: '0.5rem 0 0.75rem', color: 'var(--text-muted)' }}>
+        Removing {total === 1 ? 'it' : 'them'} also removes {plural(unused.alias_count, 'alternate name', 'alternate names')} and {plural(unused.relationship_count, 'relationship link', 'relationship links')} recorded for {unused.entities.length === 1 ? 'this entity' : 'these entities'}.
+        If you later re-ingest a document that mentions one, it will be created again without them. This cannot be undone.
+      </p>
+      <button className="btn btn-danger" style={small} onClick={remove} disabled={state === 'removing'}>
+        {state === 'removing' ? 'Removing…' : `Remove ${plural(total, 'unused item', 'unused items')}`}
+      </button>
+      <button className="btn btn-ghost" style={{ ...small, marginLeft: '0.5rem' }} onClick={() => setState('idle')} disabled={state === 'removing'}>
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 function TypeBadge({ type }) {
   const c = TYPE_COLORS[type] || TYPE_COLORS.unknown
   return (
@@ -403,9 +485,10 @@ export default function Entities() {
         <h1 style={{ fontFamily: 'var(--font-serif)', fontSize: '1.5rem', color: 'var(--navy)', margin: '0 0 0.25rem' }}>
           Entities
         </h1>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: 0 }}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.88rem', margin: '0 0 0.6rem' }}>
           {total} entities — edit attributes, merge duplicates, or delete entries.
         </p>
+        <CleanupUnusedPanel onDone={() => load(1, q, typeFilter)} />
       </div>
 
       {/* Filters */}

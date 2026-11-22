@@ -116,6 +116,13 @@ const api = {
   removeEntityAlias: (id, aliasId) =>
     request('DELETE', `/api/entities/${id}/aliases/${aliasId}`),
 
+  // Unused entities/tags are kept until the researcher reviews and removes them.
+  getUnused: () =>
+    request('GET', '/api/maintenance/unused'),
+
+  cleanupUnused: (entityIds, tagIds) =>
+    request('POST', '/api/maintenance/cleanup-unused', { entity_ids: entityIds, tag_ids: tagIds }),
+
   // ── Search ───────────────────────────────────────────────────────────────
   search: (params = {}) => {
     // URLSearchParams stringifies array values as comma-joined; the search
@@ -231,12 +238,6 @@ const api = {
   exportTimelineUrl: (params = {}) =>
     '/api/export/timeline?' + new URLSearchParams(params),
 
-  exportEntityUrl: (entityId) =>
-    `/api/export/entity/${entityId}`,
-
-  exportSelection: (docIds) =>
-    request('POST', '/api/export/selection', { doc_ids: docIds }),
-
   // ── Stats ─────────────────────────────────────────────────────────────────
   getStats: () =>
     request('GET', '/api/stats'),
@@ -244,6 +245,25 @@ const api = {
   // ── Health ────────────────────────────────────────────────────────────────
   getHealth: () =>
     request('GET', '/api/health'),
+
+  // ── Settings / desktop app ──────────────────────────────────────────────────
+  getSettings: () =>
+    request('GET', '/api/settings'),
+
+  saveApiKey: (provider, key) =>
+    request('PUT', `/api/settings/keys/${provider}`, { key }),
+
+  removeApiKey: (provider) =>
+    request('DELETE', `/api/settings/keys/${provider}`),
+
+  testApiKey: (provider) =>
+    request('POST', `/api/settings/keys/${provider}/test`),
+
+  openFolder: (which) =>
+    request('POST', '/api/system/open-folder', { which }),
+
+  quitApp: () =>
+    request('POST', '/api/system/quit'),
 }
 
 export default api

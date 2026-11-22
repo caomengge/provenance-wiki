@@ -10,6 +10,8 @@ Routes:
   GET    /api/entities/:id/documents – documents mentioning this entity
   POST   /api/entities/:id/aliases   – add an alternate name
   DELETE /api/entities/:id/aliases/:alias_id – remove an alternate name
+  GET    /api/maintenance/unused     – preview unused entities and tags
+  POST   /api/maintenance/cleanup-unused – remove the confirmed unused items
 """
 
 from flask import Blueprint, abort, jsonify, request
@@ -485,3 +487,27 @@ def delete_alias(entity_id, alias_id):
                      action="remove_alias", old=row["name"])
 
     return jsonify({"ok": True})
+
+
+# ── Clean up unused entities and tags (user-initiated) ───────────────────────
+
+@bp.route("/api/maintenance/unused", methods=["GET"])
+def preview_unused():
+    from modules.db import get_db
+    from modules.maintenance import find_unused
+    with get_db() as conn:
+        return jsonify(find_unused(conn))
+
+
+@bp.route("/api/maintenance/cleanup-unused", methods=["POST"])
+def cleanup_unused():
+    from modules.db import get_db
+    from modules.maintenance import remove_unused
+    data = request.get_json(silent=True) or {}
+    try:
+        entity_ids = [int(i) for i in data.get("entity_ids") or []]
+        tag_ids = [int(i) for i in data.get("tag_ids") or []]
+    except (TypeError, ValueError):
+        return jsonify({"error": "entity_ids and tag_ids must be lists of ids"}), 400
+    with get_db() as conn:
+        return jsonify(remove_unused(conn, entity_ids, tag_ids))

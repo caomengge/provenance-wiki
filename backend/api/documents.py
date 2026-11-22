@@ -360,18 +360,8 @@ def delete_document(doc_id):
         # Delete DB record — CASCADE removes document_entities, transactions, links, document_tags
         conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
 
-        # Clean up entities and tags that are no longer referenced by any
-        # document or group (orphans from this deletion).
-        conn.execute("""
-            DELETE FROM entities
-            WHERE id NOT IN (SELECT entity_id FROM document_entities)
-              AND id NOT IN (SELECT entity_id FROM group_entities)
-        """)
-        conn.execute("""
-            DELETE FROM tags
-            WHERE id NOT IN (SELECT tag_id FROM document_tags)
-              AND id NOT IN (SELECT tag_id FROM group_tags)
-        """)
+        # Entities and tags left unused are kept; the researcher removes them with
+        # "Clean up unused" on the Entities page (modules/maintenance.py).
 
     # Delete photo from disk (best-effort; non-fatal if already missing)
     photo_path = PHOTOS_DIR / filename
@@ -453,12 +443,7 @@ def remove_document_entity(doc_id, entity_id):
         from modules.db import record_audit
         record_audit(conn, entity_type="document", entity_id=doc_id, action="remove_entity",
                      old={"entity_id": entity_id, "name": ent_name["name"] if ent_name else None})
-        conn.execute(
-            """DELETE FROM entities WHERE id=?
-               AND id NOT IN (SELECT entity_id FROM document_entities)
-               AND id NOT IN (SELECT entity_id FROM group_entities)""",
-            (entity_id,),
-        )
+        # The entity itself is kept even if now unused (see modules/maintenance.py).
 
     from modules.indexer import reindex_document_safe
     reindex_document_safe(doc_id)

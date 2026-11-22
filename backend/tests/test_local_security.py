@@ -5,7 +5,7 @@ Tests for local-only request protection (run from backend/):
 
 Reproduces the cross-site attack (a foreign website sending DELETE to the
 local server) and DNS rebinding (a foreign Host header), and checks that the
-app's own UI, the Vite dev server and the PDF export form still work.
+app's own UI and the Vite dev server still work.
 """
 
 import os
@@ -98,16 +98,12 @@ def test_dns_rebinding_host_is_refused(client):
     assert r.status_code == 200
 
 
-def test_export_form_works_without_header_but_not_cross_site(client):
+def test_every_api_write_needs_the_ui_header(client):
+    """No exemptions: a plain cross-site form post can't carry the header."""
     c, _ = client
-    foreign = c.post("/api/export/selection", data={"doc_ids": "[1]"},
-                     headers={"Origin": "https://evil.example"})
-    assert foreign.status_code == 403
-    own = c.post("/api/export/selection", data={"doc_ids": "[1]"},
-                 headers={"Origin": OWN})
-    # Past the guard: either a PDF or an export error, never the guard's 403
-    assert own.status_code != 403
-
+    for path in ("/api/tags", "/api/export/selection", "/api/qa", "/api/ingest"):
+        r = c.post(path, data={"x": "1"}, headers={"Origin": OWN})
+        assert r.status_code == 403, path
 
 def test_reads_still_work(client):
     c, _ = client
@@ -120,3 +116,25 @@ def test_default_bind_is_loopback():
     r = subprocess.run([sys.executable, "-c", "import config; print(config.FLASK_HOST)"],
                        capture_output=True, text=True, env=env, cwd=str(BACKEND))
     assert r.stdout.strip() == "127.0.0.1"
+
+
+def test_client_side_routes_load_on_reload(client):
+    """A reload or bookmark of /entities etc. must serve the app, not a JSON 404."""
+    c, _ = client
+    if not (Path(config.DIST_DIR) / "index.html").exists():
+        pytest.skip("frontend not built")
+    for path in ("/gallery", "/entities", "/documents/1", "/search?q=x"):
+        r = c.get(path)
+        assert r.status_code == 200 and b"<div id=\"root\"" in r.data, path
+    assert c.get("/api/does-not-exist").status_code == 404
+    assert c.get("/assets/missing.js").status_code == 404
+
+
+
+def test_pdf_exports_are_gone_and_csv_timeline_remains(client):
+    c, _ = client
+    assert c.get("/api/export/entity/1").status_code == 404
+    assert c.post("/api/export/selection", json={"doc_ids": [1]},
+                  headers={"Origin": OWN, **UI}).status_code in (404, 405)
+    r = c.get("/api/export/timeline")
+    assert r.status_code == 200 and r.mimetype == "text/csv"

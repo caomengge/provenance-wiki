@@ -27,3 +27,6 @@ frontend/.vite/
 
 # Experiment outputs
 experiments/results/
+
+# Desktop builds
+build/

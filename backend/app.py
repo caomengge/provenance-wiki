@@ -56,9 +56,11 @@ def create_app() -> Flask:
     from api.export_routes   import bp as export_bp
     from api.groups          import bp as groups_bp
     from api.transactions    import bp as transactions_bp
+    from api.settings_routes import bp as settings_bp
 
     for bp in [docs_bp, entities_bp, search_bp, ingest_bp,
-               timeline_bp, network_bp, qa_bp, export_bp, groups_bp, transactions_bp]:
+               timeline_bp, network_bp, qa_bp, export_bp, groups_bp, transactions_bp,
+               settings_bp]:
         app.register_blueprint(bp)
 
     # ── Stats endpoint ────────────────────────────────────────────────────────
@@ -152,9 +154,17 @@ def create_app() -> Flask:
     # ── Health check ──────────────────────────────────────────────────────────
     @app.route("/api/health")
     def health():
-        from config import ANTHROPIC_API_KEY
+        # Booleans only — never return any part of a key.
+        from config import ANTHROPIC_API_KEY, VOYAGE_API_KEY, APP_VERSION, PACKAGED, TESTING_BUILD
         return jsonify({
             "status": "ok",
+            "app": "provenance-wiki",      # lets the desktop launcher recognise its own server
+            "version": APP_VERSION,
+            "packaged": PACKAGED,
+            "testing_build": TESTING_BUILD,
+            "anthropic_key_set": bool(ANTHROPIC_API_KEY),
+            "voyage_key_set": bool(VOYAGE_API_KEY),
+            # Deprecated alias of anthropic_key_set, kept for older clients.
             "api_key_set": bool(ANTHROPIC_API_KEY),
         })
 
@@ -174,6 +184,15 @@ def create_app() -> Flask:
     # ── Error handlers ────────────────────────────────────────────────────────
     @app.errorhandler(404)
     def not_found(exc):
+        # Flask's static route ("/<path:filename>", static_url_path="") wins
+        # over serve_spa for paths like /entities, so a reload or bookmarked
+        # link to any client-side route 404'd. Serve the SPA for those.
+        from flask import request
+        index = Path(app.static_folder) / "index.html"
+        is_file_request = "." in request.path.rsplit("/", 1)[-1]   # e.g. a missing .js asset
+        if (request.method == "GET" and not request.path.startswith("/api/")
+                and not is_file_request and index.exists()):
+            return send_from_directory(str(Path(app.static_folder)), "index.html")
         return jsonify({"error": "Not found"}), 404
 
     @app.errorhandler(405)

@@ -4,12 +4,14 @@ import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
 import TagFilter from '../components/TagFilter'
 import api from '../api/client'
+import SemanticUnavailableNotice from '../components/SemanticUnavailableNotice'
 
 export default function Search() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery]     = useState(searchParams.get('q') || '')
   const [mode, setMode]       = useState('keyword')
   const [results, setResults] = useState([])
+  const [retrievalInfo, setRetrievalInfo] = useState(null)
   const [total, setTotal]     = useState(0)
   const [page, setPage]       = useState(1)
   const [loading, setLoading] = useState(false)
@@ -33,7 +35,6 @@ export default function Search() {
   // Selection / batch-edit
   const [selectMode,   setSelectMode]   = useState(false)
   const [selectedIds,  setSelectedIds]  = useState(new Set())
-  const [exporting,    setExporting]    = useState(false)
 
   const PER_PAGE = 20
 
@@ -73,6 +74,7 @@ export default function Search() {
       if (filterTags.length)   params.tag_id         = filterTags.map(t => t.id)
       const res = await api.search(params)
       setResults(res.results || [])
+      setRetrievalInfo(mode === 'keyword' ? null : { semantic_available: res.semantic_available, semantic_error: res.semantic_error })
       setTotal(res.total || 0)
       setFilenameMatches(res.filename_matches?.matches || [])
       setPage(p)
@@ -143,26 +145,6 @@ export default function Search() {
     }
   }
 
-  const exportSelection = async () => {
-    if (selectedIds.size === 0) return
-    setExporting(true)
-    try {
-      const form   = document.createElement('form')
-      form.method  = 'POST'
-      form.action  = '/api/export/selection'
-      form.target  = '_blank'
-      const input  = document.createElement('input')
-      input.type   = 'hidden'
-      input.name   = 'doc_ids'
-      input.value  = JSON.stringify([...selectedIds])
-      form.appendChild(input)
-      document.body.appendChild(form)
-      form.submit()
-      document.body.removeChild(form)
-    } finally {
-      setExporting(false)
-    }
-  }
 
   const totalPages = Math.ceil(total / PER_PAGE)
 
@@ -185,7 +167,7 @@ export default function Search() {
               <button
                 className="btn btn-ghost"
                 onClick={() => setSelectMode(true)}
-                title="Select results to export or batch-edit"
+                title="Select results to batch-edit"
               >
                 ☐ Select
               </button>
@@ -253,8 +235,6 @@ export default function Search() {
             <BatchEditBar
               selectedIds={selectedIds}
               onClear={exitSelectMode}
-              onExport={exportSelection}
-              exporting={exporting}
               archives={archives}
               onDone={() => doSearch(query, page)}
             />
@@ -306,6 +286,8 @@ export default function Search() {
             ))}
           </div>
         )}
+
+        {!loading && <SemanticUnavailableNotice retrieval={retrievalInfo} />}
 
         {loading ? (
           <div className="loading">Searching…</div>

@@ -21,9 +21,7 @@ Three checks, applied to every request:
 3. Custom header (state-changing /api/ requests). The frontend sends
    X-Provenance-Wiki: 1. Browsers will not attach a custom header to a
    cross-site request unless the server approves a CORS preflight, which this
-   server never does. Defence in depth for browsers that omit Origin. The
-   PDF export form (a native form submission, read-only) is exempt from this
-   check but still subject to checks 1 and 2.
+   server never does. Defence in depth for browsers that omit Origin.
 
 No CORS headers are sent at all: the built app is served from the same origin
 as the API, and the Vite dev server proxies /api, so neither needs CORS.
@@ -41,8 +39,6 @@ CSRF_HEADER = "X-Provenance-Wiki"
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
-# Native form submissions that cannot carry a custom header. Read-only.
-HEADER_EXEMPT_PATHS = {"/api/export/selection"}
 
 DEFAULT_DEV_ORIGINS = "http://localhost:3000,http://127.0.0.1:3000"
 
@@ -84,8 +80,6 @@ def install_local_guard(app: Flask) -> None:
             logger.warning("Rejected cross-origin %s %s", request.method, request.path)
             return jsonify({"error": "Cross-origin request refused."}), 403
 
-        if (request.path.startswith("/api/")
-                and request.path not in HEADER_EXEMPT_PATHS
-                and request.headers.get(CSRF_HEADER) != "1"):
+        if request.path.startswith("/api/") and request.headers.get(CSRF_HEADER) != "1":
             return jsonify({"error": f"Missing {CSRF_HEADER} header."}), 403
         return None

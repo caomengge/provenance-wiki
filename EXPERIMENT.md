@@ -52,20 +52,31 @@ python scripts/migrate_experiment.py
 
 ## Running the experiment
 
+The research query set and evaluation corpus snapshot are kept on the
+`local-llm-experiment` branch, not in `main`. Supply your own queries CSV with
+these columns (UTF-8, header row required):
+
+```csv
+query_id,query,query_type,notes
+Q1,Who acquired the ceiling?,factual,Direct object query
+Q2,Who acted as intermediaries?,relational,Names of dealers and agents
+```
+
+
 ```bash
 cd backend
 
 # Conditions A, B, C
-python experiment.py --queries ../experiments/queries.example.csv \
+python experiment.py --queries /path/to/your/queries.csv \
     --modes keyword_original semantic_original semantic_modelled \
-    --top-k 10 --output ../experiments/results/
+    --top-k 10 --output /path/to/results/
 
 # All four conditions (D = C's frozen ranking + evidence hydration + Claude;
 # requires ANTHROPIC_API_KEY; --no-generate logs retrieval + evidence only)
-python experiment.py --queries ../experiments/queries.example.csv \
+python experiment.py --queries /path/to/your/queries.csv \
     --modes keyword_original semantic_original semantic_modelled rag \
     --rag-retrieval-mode semantic_modelled --top-k 10 \
-    --output ../experiments/results/
+    --output /path/to/results/
 
 # Tests
 python -m pytest tests/test_experiment.py -v
@@ -73,7 +84,7 @@ python -m pytest tests/test_experiment.py -v
 
 ## Outputs
 
-Each run writes `experiments/results/<UTC timestamp>/`:
+Each run writes `<output>/<UTC timestamp>/` (the directory you pass with `--output`):
 
 - `results.json` — full structured record (queries, conditions, ranked results, discovery chunks, evidence, errors, RAG answers), stamped with `config_version`.
 - `results.csv` — one row per (query × mode × rank) with doc_id, record_type, score, title, source_archive, plus `config_version`, embedding provider/model, `index_schema_version`, and the discovery chunk (`discovery_chunk_id`, `discovery_representation_type`, `discovery_excerpt`).

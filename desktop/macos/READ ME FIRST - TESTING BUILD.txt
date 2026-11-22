@@ -1,0 +1,30 @@
+PROVENANCE WIKI — TESTING BUILD (macOS, Apple Silicon)
+======================================================
+
+This build is for evaluation only. It is NOT signed with an Apple Developer ID
+and NOT notarized by Apple, so macOS will block it the first time you open it.
+Do not share it as a public download.
+
+Install
+  1. Drag "Provenance Wiki (Testing)" into the Applications folder.
+  2. Open it from Applications. macOS will say it cannot verify the app.
+     Click "Done" (do NOT move it to the Trash).
+  3. Open System Settings > Privacy & Security. Scroll down to the message
+     about "Provenance Wiki (Testing)" and click "Open Anyway". Enter your
+     password if asked, then click "Open Anyway" again.
+  You only need to do this once per version.
+
+Use
+  - The app opens in your web browser. A small "P" icon appears in the menu
+    bar at the top of the screen: use it to reopen the app, open your photos
+    folder, or Quit.
+  - On first launch, add your Anthropic and Voyage AI API keys. They are
+    stored in your macOS Keychain.
+  - Please test with sample documents or COPIES of your material.
+
+Your data
+  ~/Library/Application Support/ProvenanceWiki   (archive and photographs)
+  ~/Library/Logs/ProvenanceWiki                  (logs)
+  Deleting the app does not delete your data.
+
+Requirements: a Mac with Apple Silicon (M1 or later), macOS 15 Sequoia or later.
