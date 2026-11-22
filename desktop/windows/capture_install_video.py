@@ -208,7 +208,7 @@ def downloads_and_launch():
         win32gui.MoveWindow(ex.handle, 180, 110, 1500, 820, True)
         ex.set_focus()
         time.sleep(1.5)
-        item = find_desc(ex, lambda t: t == target.name, "ListItem")
+        item = find_desc(ex, lambda t: t.startswith("ProvenanceWiki-Setup"), "ListItem")
         shot("downloads", {"file": rect(item), "window": rect(ex)})
     else:
         shot("downloads")
@@ -361,11 +361,12 @@ def focus_edge():
 
 
 def box_of(page, locator):
-    b = locator.bounding_box()
+    b = locator.bounding_box(timeout=8000)
     if not b:
         return None
+    z = page.evaluate("window.devicePixelRatio")
     ox, oy = content_origin()
-    return [ox + b["x"], oy + b["y"], ox + b["x"] + b["width"], oy + b["y"] + b["height"]]
+    return [ox + b["x"] * z, oy + b["y"] * z, ox + (b["x"] + b["width"]) * z, oy + (b["y"] + b["height"]) * z]
 
 
 def to_center(page, locator):
@@ -398,6 +399,11 @@ def app_flow():
         page.wait_for_selector("text=Create my archive here", timeout=30000)
         page.wait_for_timeout(1500)
         focus_edge()
+        keyboard.send_keys("^{=}")
+        time.sleep(0.4)
+        keyboard.send_keys("^{=}")          # 125%
+        time.sleep(1)
+        log(f"page zoom: devicePixelRatio={page.evaluate('window.devicePixelRatio')}")
         for fn in (welcome, archive, keys, step3, step4):
             step(fn)(page)
         browser.close()
@@ -412,8 +418,8 @@ def welcome(page):
 
 def archive(page):
     s1 = section(page, "Where to store your archive")
-    other = page.get_by_role("button", name="Choose another folder").first
-    other_box = box_of(page, other)
+    other = page.get_by_text("Choose another folder", exact=True).first
+    other_box = box_of(page, other.locator("xpath=ancestor::label[1]"))
     other.click()
     dlg = find_window(lambda t, c: c == "#32770", 15)
     time.sleep(1.5)
@@ -423,6 +429,8 @@ def archive(page):
         (cancel.click_input() if cancel else dlg.close())
     focus_edge()
     page.wait_for_timeout(1500)
+    page.get_by_text("Use the suggested location", exact=True).first.click()
+    page.wait_for_timeout(800)
     page.get_by_role("button", name="Create my archive here").click()
     page.wait_for_selector("text=Where your archive is stored", timeout=30000)
     page.wait_for_timeout(1200)
@@ -543,45 +551,61 @@ def step4(page):
 
 # ── 3. Tray icon and Start menu ──────────────────────────────────────────────
 
+def find_anywhere(pred, control_type="Button"):
+    for w in UIA.windows():
+        try:
+            c = find_desc(w, pred, control_type)
+            if c:
+                return c
+        except Exception:
+            pass
+    return None
+
+
+def is_ours(t):
+    return "Provenance" in (t or "")
+
+
 @step
 def tray():
     bar = UIA.window(class_name="Shell_TrayWnd")
-    icon = find_desc(bar, lambda t: "Provenance" in t, "Button")
-    chevron = None
+    clock = find_desc(bar, lambda t: ":" in t and ("AM" in t or "PM" in t))
+    icon = find_desc(bar, is_ours, "Button")
     if not icon:
         chevron = find_desc(bar, lambda t: "hidden icons" in t.lower() or "chevron" in t.lower(), "Button")
-        shot("tray", {"chevron": rect(chevron), "clock": rect(find_desc(bar, lambda t: ":" in t and "M" in t, "Button"))})
+        shot("tray", {"chevron": rect(chevron), "clock": rect(clock)})
         chevron.click_input()
-        time.sleep(1.5)
-        over = find_window(lambda t, c: c == "NotifyIconOverflowWindow" or "Overflow" in t, 5)
-        icon = find_desc(over, lambda t: "Provenance" in t, "Button") if over else None
-        shot("tray_open", {"icon": rect(icon), "overflow": rect(over) if over else None})
+        time.sleep(2)
+        icon = find_anywhere(is_ours)
+        log("overflow windows: " + "; ".join(window_list()))
+        shot("tray_open", {"icon": rect(icon)})
     else:
-        shot("tray", {"icon": rect(icon)})
-    if icon:
-        icon.right_click_input()
-        time.sleep(1.5)
-        menu = find_window(lambda t, c: c == "#32768", 5)
-        r = None
-        if menu:
-            r = rect(menu)
-        else:
-            hwnd = win32gui.FindWindow("#32768", None)
-            if hwnd:
-                r = list(win32gui.GetWindowRect(hwnd))
-        shot("tray_menu", {"menu": r, "icon": rect(icon)})
-        keyboard.send_keys("{ESC}")
-        time.sleep(0.5)
+        shot("tray", {"icon": rect(icon), "clock": rect(clock)})
+    if not icon:
+        log("tray icon not found")
+        return
+    icon.right_click_input()
+    time.sleep(1.5)
+    r = None
+    hwnd = win32gui.FindWindow("#32768", None)
+    if hwnd:
+        r = list(win32gui.GetWindowRect(hwnd))
+    shot("tray_menu", {"menu": r, "icon": rect(icon)})
+    keyboard.send_keys("{ESC}")
+    time.sleep(0.5)
     keyboard.send_keys("{ESC}")
 
 
 @step
 def start_menu():
     keyboard.send_keys("{VK_LWIN}")
-    time.sleep(2.5)
+    time.sleep(3)
+    item = find_anywhere(is_ours, None)
+    shot("start_menu", {"item": rect(item)})
     keyboard.send_keys("Provenance", with_spaces=True, pause=0.08)
-    time.sleep(4)
-    shot("start_menu")
+    time.sleep(8)
+    item = find_anywhere(is_ours, None)
+    shot("start_search", {"item": rect(item)})
     keyboard.send_keys("{ESC}")
 
 
