@@ -26,8 +26,20 @@ THUMBNAIL_QUALITY = 82            # JPEG quality for thumbnails
 IMAGE_CACHE_SECONDS = 3600        # browser cache lifetime for image responses
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-VOYAGE_API_KEY    = os.getenv("VOYAGE_API_KEY", "")
+# Template placeholders (e.g. YOUR_KEY_HERE from .env.example) must never count
+# as a configured key. They are removed from the environment as well, because
+# modules/embeddings.py reads VOYAGE_API_KEY from os.environ directly.
+def _is_placeholder_key(value: str) -> bool:
+    v = (value or "").strip()
+    return not v or v.upper().startswith("YOUR_") or v.upper() in {"CHANGEME", "REPLACE_ME", "XXX"}
+
+
+for _name in ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY"):
+    if _is_placeholder_key(os.environ.get(_name, "")):
+        os.environ.pop(_name, None)
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+VOYAGE_API_KEY    = os.getenv("VOYAGE_API_KEY", "").strip()
 
 # ── Claude Models ─────────────────────────────────────────────────────────────
 VISION_MODEL     = "claude-sonnet-4-6"

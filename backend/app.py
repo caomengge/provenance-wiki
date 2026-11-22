@@ -152,9 +152,13 @@ def create_app() -> Flask:
     # ── Health check ──────────────────────────────────────────────────────────
     @app.route("/api/health")
     def health():
-        from config import ANTHROPIC_API_KEY
+        # Booleans only — never return any part of a key.
+        from config import ANTHROPIC_API_KEY, VOYAGE_API_KEY
         return jsonify({
             "status": "ok",
+            "anthropic_key_set": bool(ANTHROPIC_API_KEY),
+            "voyage_key_set": bool(VOYAGE_API_KEY),
+            # Deprecated alias of anthropic_key_set, kept for older clients.
             "api_key_set": bool(ANTHROPIC_API_KEY),
         })
 
