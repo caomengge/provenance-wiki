@@ -17,5 +17,7 @@ jobs:
           python-version: "3.12"
       - name: Current picker (as shipped)
         run: python desktop/windows/picker_probe.py current
-      - name: Picker in the app's code
+      - name: Picker in the app's code (console parent)
         run: python desktop/windows/picker_probe.py module
+      - name: Picker in the app's code, started without a console (like the installed app)
+        run: python desktop/windows/picker_probe.py no-console

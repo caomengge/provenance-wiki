@@ -100,11 +100,53 @@ def probe_module():
     return dialog and dialog["topmost"] and not t.is_alive() and result.get("value") is None
 
 
+def probe_no_console():
+    """Like the installed app: the picker is started from a process without a
+    console (pythonw.exe). The dialog must appear, be on top, and the app's
+    Cancel must close it."""
+    import json
+    import os
+    import tempfile
+    backend = str(Path(__file__).resolve().parents[2] / "backend")
+    out = Path(tempfile.mkdtemp()) / "result.json"
+    code = (
+        "import sys, json, threading, time\n"
+        f"sys.path.insert(0, {backend!r})\n"
+        "from modules import archive_location as al\n"
+        "res = {}\n"
+        "t = threading.Thread(target=lambda: res.update(value=al.choose_folder('Probe')))\n"
+        "t.start(); time.sleep(12); al.cancel_folder_picker(); t.join(20)\n"
+        f"open({str(out)!r}, 'w').write(json.dumps({{'value': res.get('value', 'MISSING'), 'alive': t.is_alive()}}))\n"
+    )
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    p = subprocess.Popen([str(pythonw), "-c", code])
+    dialog = None
+    for _ in range(50):
+        @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+        def cb(hwnd, _):
+            nonlocal dialog
+            title = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            if title.value == "Browse For Folder" and user32.IsWindowVisible(hwnd):
+                dialog = {"visible": True,
+                          "topmost": bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)}
+            return True
+        user32.EnumWindows(cb, 0)
+        if dialog:
+            break
+        time.sleep(0.2)
+    print("[no-console] dialog:", dialog)
+    p.wait(60)
+    result = json.loads(out.read_text()) if out.exists() else None
+    print("[no-console] result:", result)
+    return bool(dialog and dialog["topmost"] and result and result["value"] is None and not result["alive"])
+
+
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "current"
     if which == "current":
         d = probe_script("current", CURRENT)
         sys.exit(0)        # diagnostic only
-    ok = probe_module()
+    ok = probe_no_console() if which == "no-console" else probe_module()
     print("RESULT:", "PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)

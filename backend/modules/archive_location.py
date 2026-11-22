@@ -775,34 +775,74 @@ class PickerUnavailable(Exception):
     pass
 
 
+_picker_lock = threading.Lock()
+_picker_proc: subprocess.Popen | None = None
+_picker_cancelled = threading.Event()
+
+
+def cancel_folder_picker() -> bool:
+    """Close a folder dialog that is open (or stuck). True if one was closed."""
+    with _picker_lock:
+        proc = _picker_proc
+    if proc is not None and proc.poll() is None:
+        _picker_cancelled.set()
+        proc.kill()
+        return True
+    return False
+
+
+def _run_picker(cmd: list[str], **kw) -> tuple[int, str, str]:
+    """Run a picker helper. stdin is an empty input, not inherited: the desktop
+    app has no console, and PowerShell can hang on an invalid stdin handle."""
+    global _picker_proc
+    cancel_folder_picker()                     # only one dialog at a time
+    _picker_cancelled.clear()
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, **kw)
+    with _picker_lock:
+        _picker_proc = proc
+    try:
+        out, err = proc.communicate(timeout=900)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    finally:
+        with _picker_lock:
+            if _picker_proc is proc:
+                _picker_proc = None
+    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
 def choose_folder(prompt: str) -> str | None:
     """Show the system's folder picker on this computer; None if cancelled."""
     if IS_MAC:
         script = f'POSIX path of (choose folder with prompt "{prompt}")'
-        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=900)
-        if r.returncode != 0:
-            if "-128" in r.stderr or "cancel" in r.stderr.lower():
-                return None
-            raise PickerUnavailable(r.stderr.strip())
-        return r.stdout.strip().rstrip("/") or "/"
+        code, out, err = _run_picker(["osascript", "-e", script])
+        if code != 0:
+            if _picker_cancelled.is_set() or "-128" in err or "cancel" in err.lower():
+                return None                    # cancelled by the user or by the app
+            raise PickerUnavailable(err.strip())
+        return out.strip().rstrip("/") or "/"
     if IS_WIN:
         ps = (
-            "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
             "Add-Type -AssemblyName System.Windows.Forms;"
-            "$f=New-Object System.Windows.Forms.Form -Property @{TopMost=$true};"
+            # Hidden always-on-top owner window, so the dialog can't open
+            # behind the browser.
+            "$f=New-Object System.Windows.Forms.Form -Property @{TopMost=$true;ShowInTaskbar=$false};"
             "$d=New-Object System.Windows.Forms.FolderBrowserDialog;"
             f"$d.Description='{prompt}';$d.ShowNewFolderButton=$true;"
-            "if($d.ShowDialog($f) -eq 'OK'){ Write-Output $d.SelectedPath }"
+            "if($d.ShowDialog($f) -eq 'OK'){ [Console]::Out.Write($d.SelectedPath) }"
         )
-        r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
-                           capture_output=True, timeout=900,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if r.returncode != 0:
-            raise PickerUnavailable(r.stderr.decode("utf-8", "replace").strip())
-        out = r.stdout.decode("utf-8", "replace").strip()
-        return out or None
+        code, out, err = _run_picker(
+            ["powershell", "-NoProfile", "-NonInteractive", "-STA", "-OutputFormat", "Text",
+             "-Command", ps],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if code != 0:
+            if _picker_cancelled.is_set():     # closed by the app's Cancel button
+                return None
+            raise PickerUnavailable(err.strip())
+        return out.strip() or None
     if shutil.which("zenity"):
-        r = subprocess.run(["zenity", "--file-selection", "--directory", f"--title={prompt}"],
-                           capture_output=True, text=True, timeout=900)
-        return r.stdout.strip() or None
+        code, out, _err = _run_picker(["zenity", "--file-selection", "--directory", f"--title={prompt}"])
+        return out.strip() or None
     raise PickerUnavailable("No folder picker available")

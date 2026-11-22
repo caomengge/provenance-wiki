@@ -6,6 +6,7 @@ Spec: specs/archive-location.md. Logic: modules/archive_location.py.
 Routes:
   GET  /api/archive/location            state, path, size, free space, old copy, move status
   POST /api/archive/choose-folder       show the system folder picker on this computer
+  POST /api/archive/choose-folder/cancel close a folder dialog that is open or stuck
   POST /api/archive/check               apply the destination rules to a folder
   POST /api/archive/setup               first launch / start a new archive at a folder
   POST /api/archive/locate              open an existing archive (marker must match unless allowed)
@@ -85,6 +86,11 @@ def choose_folder():
         logger.exception("Folder picker failed")
         return _error("The folder picker didn't open. Type the folder path instead.", 501)
     return jsonify({"path": path, "cancelled": path is None})
+
+
+@bp.route("/api/archive/choose-folder/cancel", methods=["POST"])
+def cancel_choose_folder():
+    return jsonify({"closed": _al().cancel_folder_picker()})
 
 
 @bp.route("/api/archive/check", methods=["POST"])
