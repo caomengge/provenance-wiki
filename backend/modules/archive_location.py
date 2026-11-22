@@ -362,8 +362,10 @@ def _forbidden_roots() -> list[Path]:
             if os.environ.get(var):
                 roots.append(Path(os.environ[var]))
     elif IS_MAC:
+        # Not all of /private or /var: user folders (e.g. temporary ones) live there.
         roots += [Path(p) for p in ("/System", "/Applications", "/Library", "/usr", "/bin",
-                                    "/sbin", "/private", "/etc", "/var", "/opt", "/cores")]
+                                    "/sbin", "/etc", "/private/etc", "/private/var/db",
+                                    "/private/var/root", "/opt", "/cores")]
     else:
         roots += [Path(p) for p in ("/usr", "/bin", "/sbin", "/etc", "/proc", "/sys", "/dev",
                                     "/boot", "/lib", "/var/lib")]

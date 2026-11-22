@@ -32,8 +32,12 @@ You only need to do step 4 once for each new testing version.
 - The app opens in your default web browser at an address like `http://127.0.0.1:5100`.
 - A small **P** icon appears in the menu bar at the top of the screen. Its menu has
   **Open Provenance Wiki**, **Open Photos Folder**, **Open Archive Folder** and **Quit**.
-- The **Welcome** screen asks for your two API keys. You can skip it and come back
-  any time via **Settings** in the sidebar.
+- The **Welcome** screen first asks **where to store your archive**. The suggested location is
+  on your Mac's main drive; to use a larger or external drive, choose **Choose another folder**.
+  A folder named `Provenance Wiki Archive` is created there, holding everything (database,
+  photographs, logs). macOS may ask to allow access to that folder or drive: click **Allow**.
+- It then asks for your two API keys. You can skip those and come back any time via
+  **Settings** in the sidebar.
 
 Closing the browser tab does not stop the app. To stop it, choose **Quit** from the
 menu-bar icon, or **Settings → Quit Provenance Wiki**. If you closed the browser tab
@@ -68,15 +72,34 @@ material to these services before processing it.
 
 | What | Location |
 |---|---|
-| Archive (database, photographs, thumbnails) | `~/Library/Application Support/ProvenanceWiki/` |
-| Photos to ingest | `~/Library/Application Support/ProvenanceWiki/photos/` |
-| Logs | `~/Library/Logs/ProvenanceWiki/` |
+| Your archive: database, photographs (`photos/`), thumbnails, backups, logs | The folder you chose on first launch. Suggested: `~/Library/Application Support/ProvenanceWiki/` |
+| A small settings folder recording where your archive is | `~/Library/Application Support/ProvenanceWiki Config/` |
 
-Use **Open Photos Folder** from the menu-bar icon or the sidebar to add photographs,
+**Settings → Where your archive is stored** shows the exact location, its size and the free
+space. Use **Open Photos Folder** from the menu-bar icon or the sidebar to add photographs,
 then click **Ingest Photos**.
 
-**Back up** by copying the whole `ProvenanceWiki` folder from Application Support while
-the app is not running. It contains both the database and the photographs.
+**Back up** by copying the whole archive folder while the app is not running. It contains both
+the database and the photographs.
+
+### Moving your archive to another drive
+
+Photographs take most of the space (roughly 5–15 GB per 1,000 photos). To move the archive to a
+larger or external drive: **Settings → Where your archive is stored → Change location…**, choose a
+folder, check the summary, and click **Copy and switch**. Provenance Wiki copies everything,
+checks the copy file by file, and only then switches to it; if anything goes wrong, nothing
+changes. Afterwards it offers to delete the old copy (you confirm first).
+
+Folders synced by OneDrive, Google Drive, Dropbox, iCloud Drive or Box, and network drives, are
+not allowed: syncing can corrupt the archive's database.
+
+If the archive is on an external drive that isn't connected when you open Provenance Wiki, it
+says so and offers **Try again** (after connecting the drive) or **Locate my archive…** (if the
+drive or folder now has a different name). It never starts a new, empty archive without asking.
+
+With unsigned testing builds, macOS may ask again for access to an external drive or to
+Documents/Desktop after each update. That stops once the app is signed.
+
 
 ## Upgrade
 
@@ -86,9 +109,10 @@ archive and keys are kept.
 ## Uninstall
 
 Quit the app and drag it from Applications to the Trash. **Your archive is not
-deleted.** To remove it too, delete
-`~/Library/Application Support/ProvenanceWiki/` and `~/Library/Logs/ProvenanceWiki/`,
-and remove the "ProvenanceWiki" entries in the Keychain Access app.
+deleted.** To remove it too, delete your archive folder (see Settings for where it is),
+`~/Library/Application Support/ProvenanceWiki Config/`, and the "ProvenanceWiki" entries in
+the Keychain Access app. Testing builds before this version also kept logs in
+`~/Library/Logs/ProvenanceWiki/`.
 
 ## Existing source (developer) installs
 
