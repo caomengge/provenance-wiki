@@ -120,3 +120,15 @@ def test_default_bind_is_loopback():
     r = subprocess.run([sys.executable, "-c", "import config; print(config.FLASK_HOST)"],
                        capture_output=True, text=True, env=env, cwd=str(BACKEND))
     assert r.stdout.strip() == "127.0.0.1"
+
+
+def test_client_side_routes_load_on_reload(client):
+    """A reload or bookmark of /entities etc. must serve the app, not a JSON 404."""
+    c, _ = client
+    if not (Path(config.DIST_DIR) / "index.html").exists():
+        pytest.skip("frontend not built")
+    for path in ("/gallery", "/entities", "/documents/1", "/search?q=x"):
+        r = c.get(path)
+        assert r.status_code == 200 and b"<div id=\"root\"" in r.data, path
+    assert c.get("/api/does-not-exist").status_code == 404
+    assert c.get("/assets/missing.js").status_code == 404

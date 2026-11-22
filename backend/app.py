@@ -178,6 +178,15 @@ def create_app() -> Flask:
     # ── Error handlers ────────────────────────────────────────────────────────
     @app.errorhandler(404)
     def not_found(exc):
+        # Flask's static route ("/<path:filename>", static_url_path="") wins
+        # over serve_spa for paths like /entities, so a reload or bookmarked
+        # link to any client-side route 404'd. Serve the SPA for those.
+        from flask import request
+        index = Path(app.static_folder) / "index.html"
+        is_file_request = "." in request.path.rsplit("/", 1)[-1]   # e.g. a missing .js asset
+        if (request.method == "GET" and not request.path.startswith("/api/")
+                and not is_file_request and index.exists()):
+            return send_from_directory(str(Path(app.static_folder)), "index.html")
         return jsonify({"error": "Not found"}), 404
 
     @app.errorhandler(405)
