@@ -6,18 +6,59 @@ Load environment variables from .env at application startup.
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root (two levels up from backend/)
+from version import __version__ as APP_VERSION, TESTING_BUILD  # noqa: F401
+
+# ── Mode ──────────────────────────────────────────────────────────────────────
+# Source mode (a git checkout run with run.sh / python backend/app.py) keeps
+# everything inside the repository, exactly as before.
+# Packaged mode (the downloadable desktop app) keeps read-only program files
+# inside the app bundle and ALL researcher data in a per-user folder, because
+# the installed program folder may be read-only and is replaced on upgrade.
+PACKAGED = bool(getattr(sys, "frozen", False)) or os.getenv("PW_PACKAGED") == "1"
+
 ROOT_DIR = Path(__file__).parent.parent
-load_dotenv(ROOT_DIR / ".env")
+
+
+def user_data_dir() -> Path:
+    """Per-user folder for the archive in packaged mode (PW_DATA_DIR overrides)."""
+    override = os.getenv("PW_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "ProvenanceWiki"
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "ProvenanceWiki"
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "provenance-wiki"
+
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-DATA_DIR       = ROOT_DIR / "data"
-PHOTOS_DIR     = ROOT_DIR / "photos"
+if PACKAGED:
+    # Bundled, read-only resources (PyInstaller unpacks/points here).
+    RESOURCE_DIR = Path(getattr(sys, "_MEIPASS", ROOT_DIR))
+    DIST_DIR     = RESOURCE_DIR / "dist"
+    DATA_DIR     = user_data_dir()
+    PHOTOS_DIR   = DATA_DIR / "photos"
+    if sys.platform == "darwin" and not os.getenv("PW_DATA_DIR"):
+        LOG_DIR = Path.home() / "Library" / "Logs" / "ProvenanceWiki"
+    else:
+        LOG_DIR = DATA_DIR / "logs"
+    # No .env in packaged mode: keys come from the OS credential store.
+else:
+    load_dotenv(ROOT_DIR / ".env")
+    RESOURCE_DIR = ROOT_DIR
+    DATA_DIR     = ROOT_DIR / "data"
+    PHOTOS_DIR   = ROOT_DIR / "photos"
+    DIST_DIR     = ROOT_DIR / "dist"
+    LOG_DIR      = DATA_DIR / "logs"
+
 THUMBNAILS_DIR = DATA_DIR / "thumbnails"
-DIST_DIR       = ROOT_DIR / "dist"
+BACKUP_DIR     = DATA_DIR / "backups"
 DB_PATH        = DATA_DIR / "provenance.db"
 
 # ── Thumbnails ────────────────────────────────────────────────────────────────
@@ -37,6 +78,12 @@ def _is_placeholder_key(value: str) -> bool:
 for _name in ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY"):
     if _is_placeholder_key(os.environ.get(_name, "")):
         os.environ.pop(_name, None)
+
+# Keys saved through the app's Settings screen live in the OS credential store
+# (macOS Keychain / Windows Credential Manager) and take precedence over the
+# environment / .env. See modules/secrets_store.py.
+from modules.secrets_store import load_into_environ as _load_stored_keys  # noqa: E402
+_load_stored_keys()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 VOYAGE_API_KEY    = os.getenv("VOYAGE_API_KEY", "").strip()
@@ -113,3 +160,5 @@ MCP_PORT = 5001
 # Ensure data directories exist
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+if PACKAGED:
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
