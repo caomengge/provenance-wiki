@@ -1,6 +1,7 @@
 """Assemble the Windows install video from the CI screenshots and narration.
 
-    python docs/video/compose.py <screens_dir> <narration_dir> <out.mp4> [--only id,id] [--stills]
+    python docs/video/compose.py <screens_dir> <narration_dir> <out.mp4> [--platform windows|mac]
+                                 [--only id,id] [--stills]
 
 screens_dir: output of desktop/windows/capture_install_video.py (PNGs + meta.json)
 narration_dir: one WAV per scene id (docs/video/make_narration.py)
@@ -68,7 +69,35 @@ PARTS = [("Part 1 of 3 · Install", ["download", "downloads", "smartscreen1", "s
                                    "keys_test", "step3", "step4_open", "photos_folder", "check_again", "source",
                                    "ingest"]),
          ("Part 3 of 3 · Everyday use", ["tray", "tray_menu", "start_menu"])]
-PART_OF = {sid: label for label, ids in PARTS for sid in ids}
+
+SHARED_APP = {k: SEGMENTS[k] for k in ("welcome", "archive_create", "archive_other", "archive_done", "keys_paste",
+                                       "keys_test", "step3", "step4_open", "photos_folder", "check_again",
+                                       "source", "ingest")}
+MAC_SEGMENTS = dict(SHARED_APP, **{
+    "downloads":  [("downloads", "window", [])],
+    "dmg":        [("dmg", "window", [])],
+    "applications": [("applications", "window", [])],
+    "menubar":    [("menubar", "icon", ["icon"])],
+    "menu":       [("menu", "menu+icon", ["menu"])],
+    "reopen":     [("reopen", "window", [])],
+})
+MAC_PARTS = [("Part 1 of 3 · Install", ["download", "downloads", "dmg", "applications", "gatekeeper", "settings",
+                                        "password"]),
+             ("Part 2 of 3 · Set up", PARTS[1][1]),
+             ("Part 3 of 3 · Everyday use", ["menubar", "menu", "reopen"])]
+PLATFORM = {
+    "windows": {"narration": "narration.json", "segments": SEGMENTS, "parts": PARTS, "on": "on Windows"},
+    "mac": {"narration": "narration_mac.json", "segments": MAC_SEGMENTS, "parts": MAC_PARTS, "on": "on a Mac"},
+}
+CUR = PLATFORM["windows"]
+PART_OF = {}
+
+
+def use_platform(name):
+    global CUR, SEGMENTS, PART_OF
+    CUR = PLATFORM[name]
+    SEGMENTS = CUR["segments"]
+    PART_OF = {sid: label for label, ids in CUR["parts"] for sid in ids}
 
 
 def ease(t):
@@ -311,13 +340,15 @@ def card_scene(sid, caption, dur):
         if ic:
             base.paste(ic, (W // 2 - 85, 210), ic)
         d.text((W / 2, 480), "Installing Provenance Wiki", font=title, fill=GOLD_LIGHT, anchor="mm")
-        d.text((W / 2, 570), "on Windows  ·  testing version", font=sub, fill=CREAM, anchor="mm")
+        d.text((W / 2, 570), CUR["on"] + "  ·  testing version", font=sub, fill=CREAM, anchor="mm")
         d.text((W / 2, 700), "About 10 minutes   ·   No technical knowledge needed", font=sub,
                fill=(190, 200, 214), anchor="mm")
     elif sid == "need":
         d.text((W / 2, 200), "Before you start", font=title, fill=GOLD_LIGHT, anchor="mm")
-        items = ["The Provenance Wiki Setup file", "A few photographs of test documents",
-                 "Two API keys: Anthropic and Voyage AI"]
+        items = (["The Provenance Wiki Setup file", "A few photographs of test documents",
+                  "Two API keys: Anthropic and Voyage AI"] if CUR is PLATFORM["windows"] else
+                 ["A Mac with Apple silicon, macOS 15 or later", "The Provenance Wiki .dmg file",
+                  "A few photographs of test documents", "Two API keys: Anthropic and Voyage AI"])
     elif sid == "outro":
         ic = icon(140)
         if ic:
@@ -327,13 +358,17 @@ def card_scene(sid, caption, dur):
         d.text((W / 2, 630), "Send us a screenshot and a short note.", font=sub, fill=CREAM, anchor="mm")
         d.text((W / 2, 780), "Thank you for testing Provenance Wiki", font=font(SERIF.format("Italic"), 56),
                fill=GOLD, anchor="mm")
+    elif sid == "download" and CUR is PLATFORM["mac"]:
+        draw_mac_download(base)
     elif sid == "download":
         draw_download(base)
+    elif sid in ("gatekeeper", "settings", "password"):
+        draw_mac_security(base, sid)
     elif sid in ("smartscreen1", "smartscreen2"):
         draw_smartscreen(base, sid)
 
-    times = [0.12 + 0.27 * k for k in range(len(items))]
-    cap, _ = caption_layer(caption) if sid in ("download", "smartscreen1", "smartscreen2") else (None, 0)
+    times = [0.1 + (0.8 / max(1, len(items))) * k for k in range(len(items))]
+    cap, _ = caption_layer(caption) if sid not in ("intro", "need", "outro") else (None, 0)
 
     def frame(i):
         img = base.copy()
@@ -343,7 +378,7 @@ def card_scene(sid, caption, dur):
                 a = ease((i / n - times[k]) / 0.06)
                 if a <= 0:
                     continue
-                y = 420 + k * 170
+                y = (420 if len(items) == 3 else 360) + k * (170 if len(items) == 3 else 150)
                 x = 470 - int(30 * (1 - a))
                 col = tuple(int(NAVY_DEEP[j] + (c - NAVY_DEEP[j]) * a) for j, c in enumerate(GOLD))
                 dd.ellipse((x, y - 45, x + 90, y + 45), fill=col)
@@ -413,6 +448,85 @@ def draw_smartscreen(img, sid):
         button(d, (1250, 730, 1450, 800), "Don’t run", fb)
 
 
+def mac_alert(d, box):
+    d.rounded_rectangle(box, radius=26, fill=(236, 236, 238), outline=(200, 200, 205), width=2)
+
+
+def draw_mac_download(img):
+    """A simplified drawing (not a screenshot) of a browser asking to allow downloads."""
+    d = ImageDraw.Draw(img)
+    label(d, "Illustration: your browser’s message may look a little different")
+    mac_alert(d, (500, 300, 1420, 700))
+    fb = font(F.format("SemiBold"), 36)
+    f = font(F.format("Regular"), 26)
+    d.text((W / 2, 400), "Do you want to allow downloads", font=fb, fill=(25, 25, 25), anchor="mm")
+    d.text((W / 2, 450), "from this site?", font=fb, fill=(25, 25, 25), anchor="mm")
+    d.text((W / 2, 520), "You can change which websites can download files in Settings.", font=f,
+           fill=(90, 90, 90), anchor="mm")
+    button(d, (620, 590, 940, 660), "Cancel", fb)
+    button(d, (980, 590, 1300, 660), "Allow", fb, primary=True, hl=True)
+
+
+def app_icon_at(img, x, y, size):
+    ic = icon(size)
+    if ic:
+        img.paste(ic, (x, y), ic)
+
+
+def draw_mac_security(img, sid):
+    """Simplified drawings (not screenshots) of the first-open check in macOS 15."""
+    d = ImageDraw.Draw(img)
+    label(d, "Illustration: the exact wording on your Mac may differ")
+    fb = font(F.format("SemiBold"), 34)
+    f = font(F.format("Regular"), 28)
+    name = "Provenance Wiki (Testing)"
+    if sid == "gatekeeper":
+        mac_alert(d, (610, 170, 1310, 900))
+        app_icon_at(img, 900, 220, 120)
+        d.text((W / 2, 400), f"“{name}” Not Opened", font=fb, fill=(25, 25, 25), anchor="mm")
+        for k, ln in enumerate(["Apple could not verify “Provenance Wiki", "(Testing)” is free of malware that may",
+                                "harm your Mac or compromise your privacy."]):
+            d.text((W / 2, 470 + 40 * k), ln, font=f, fill=(60, 60, 60), anchor="mm")
+        button(d, (680, 650, 1240, 725), "Done", fb, primary=True, hl=True)
+        button(d, (680, 750, 1240, 825), "Move to Trash", fb)
+        d.line((660, 787, 1260, 787), fill=(200, 40, 40), width=6)
+        d.text((1290, 787), "Don’t click this", font=fb, fill=(240, 120, 110), anchor="lm")
+    elif sid == "settings":
+        d.rounded_rectangle((300, 150, 1620, 930), radius=22, fill=(246, 246, 248))
+        d.rounded_rectangle((300, 150, 720, 930), radius=22, fill=(228, 228, 232))
+        d.rectangle((700, 150, 720, 930), fill=(228, 228, 232))
+        for k, item in enumerate(["Wi-Fi", "Bluetooth", "Network", "General", "Appearance",
+                                  "Privacy & Security", "Desktop & Dock", "Displays"]):
+            y = 250 + k * 70
+            if item == "Privacy & Security":
+                d.rounded_rectangle((325, y - 28, 695, y + 28), radius=10, fill=(0, 110, 220))
+                d.rounded_rectangle((315, y - 38, 705, y + 38), radius=14, outline=HIL, width=6)
+            d.text((350, y), item, font=f, fill=(255, 255, 255) if item == "Privacy & Security" else (40, 40, 40),
+                   anchor="lm")
+        d.text((780, 230), "Privacy & Security", font=font(F.format("Bold"), 40), fill=(25, 25, 25), anchor="lm")
+        d.text((780, 380), "Security", font=fb, fill=(25, 25, 25), anchor="lm")
+        d.rounded_rectangle((770, 420, 1570, 640), radius=14, fill=(255, 255, 255), outline=(215, 215, 220))
+        d.text((810, 480), f"“{name}” was blocked to", font=f, fill=(40, 40, 40), anchor="lm")
+        d.text((810, 520), "protect your Mac.", font=f, fill=(40, 40, 40), anchor="lm")
+        button(d, (1300, 560, 1540, 620), "Open Anyway", fb, hl=True)
+        d.text((780, 720), "↓  scroll down to find this", font=f, fill=(120, 120, 130), anchor="lm")
+    else:
+        mac_alert(d, (300, 260, 900, 820))
+        d.text((600, 340), "Enter your Mac password", font=fb, fill=(25, 25, 25), anchor="mm")
+        d.text((600, 390), "to allow this.", font=f, fill=(60, 60, 60), anchor="mm")
+        d.rounded_rectangle((360, 470, 840, 540), radius=10, fill=(255, 255, 255), outline=(170, 170, 180), width=2)
+        d.text((385, 505), "••••••••", font=fb, fill=(40, 40, 40), anchor="lm")
+        d.rounded_rectangle((350, 460, 850, 550), radius=14, outline=HIL, width=6)
+        button(d, (560, 680, 840, 750), "OK", fb, primary=True)
+        d.text((W / 2, 540), "then", font=font(F.format("SemiBold"), 44), fill=GOLD_LIGHT, anchor="mm")
+        mac_alert(d, (1020, 260, 1620, 820))
+        app_icon_at(img, 1260, 300, 100)
+        d.text((1320, 460), f"Open “{name}”?", font=fb, fill=(25, 25, 25), anchor="mm")
+        d.text((1320, 520), "macOS can’t verify the developer.", font=f, fill=(60, 60, 60), anchor="mm")
+        button(d, (1080, 600, 1560, 670), "Open Anyway", fb, primary=True, hl=True)
+        button(d, (1080, 700, 1560, 770), "Move to Trash", fb)
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -421,7 +535,8 @@ def main():
     if "--only" in sys.argv:
         only = set(sys.argv[sys.argv.index("--only") + 1].split(","))
     stills = "--stills" in sys.argv
-    spec = json.loads((HERE / "narration.json").read_text(encoding="utf-8"))
+    use_platform(sys.argv[sys.argv.index("--platform") + 1] if "--platform" in sys.argv else "windows")
+    spec = json.loads((HERE / CUR["narration"]).read_text(encoding="utf-8"))
     shots = Shots(screens)
     work = out.parent / (out.stem + "-scenes")
     work.mkdir(parents=True, exist_ok=True)
