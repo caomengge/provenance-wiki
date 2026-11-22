@@ -11,7 +11,7 @@ name: Desktop build (Windows, testing-only)
 on:
   workflow_dispatch:
   push:
-    branches: [main, build/windows-installer]
+    branches: [main, build/windows-installer, fix/windows-folder-picker]
     paths:
       - backend/**
       - frontend/**
@@ -145,6 +145,12 @@ jobs:
           EXE="$LOCALAPPDATA/Programs/Provenance Wiki/ProvenanceWiki.exe"
           python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-archive-flow" --archive-flow -- "$EXE" \
             | tee build/smoke-test-windows-archive.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Folder picker opens on top and can be cancelled (installed app)
+        run: |
+          python desktop/windows/picker_probe.py app "$LOCALAPPDATA/Programs/Provenance Wiki/ProvenanceWiki.exe" \
+            | tee build/picker-test-windows.txt
           exit ${PIPESTATUS[0]}
 
       - name: Credential Manager test (dummy key, removed afterwards)

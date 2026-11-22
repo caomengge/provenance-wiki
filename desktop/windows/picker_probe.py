@@ -85,12 +85,11 @@ def probe_module():
     t.start()
     dialog = None
     for _ in range(100):
-        proc = getattr(al, "_picker_proc", None)
-        if proc is not None:
-            wins = [w for w in windows_of(proc.pid) if w["visible"]]
-            dialog = next((w for w in wins if w["class"] == "#32770"), None)
-            if dialog:
-                break
+        hwnd = al._win_dialog.get("hwnd")
+        if hwnd and user32.IsWindowVisible(hwnd):
+            dialog = {"hwnd": hwnd,
+                      "topmost": bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)}
+            break
         time.sleep(0.2)
     print("[module] dialog:", dialog)
     if hasattr(al, "cancel_folder_picker"):
@@ -183,6 +182,49 @@ def probe_no_console_current():
     print("[no-console-current] result:", out.read_text() if out.exists() else None)
 
 
+def probe_app(exe):
+    """The installed app: POST /api/archive/choose-folder opens the dialog on
+    top; POST /api/archive/choose-folder/cancel closes it."""
+    import json
+    import os
+    import tempfile
+    import urllib.request
+    root = Path(tempfile.mkdtemp())
+    env = dict(os.environ, PW_DATA_DIR=str(root / "data"), PW_CONFIG_DIR=str(root / "config"),
+               PW_NO_BROWSER="1", PW_NO_TRAY="1", PW_DISABLE_KEYRING="1")
+    app = subprocess.Popen([exe], env=env)
+    inst = root / "config" / "instance.json"
+    for _ in range(150):
+        if inst.exists():
+            break
+        time.sleep(0.2)
+    base = f"http://127.0.0.1:{json.loads(inst.read_text())['port']}"
+
+    def post(path):
+        req = urllib.request.Request(base + path, method="POST", data=b"{}",
+                                     headers={"X-Provenance-Wiki": "1", "Origin": base,
+                                              "Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=60).read())
+
+    result = {}
+    t = threading.Thread(target=lambda: result.update(post("/api/archive/choose-folder")))
+    t.start()
+    dialog = None
+    for _ in range(75):
+        wins = [w for w in windows_of(app.pid) if w["visible"] and w["class"] == "#32770"]
+        if wins:
+            dialog = wins[0]
+            break
+        time.sleep(0.2)
+    print("[app] dialog:", dialog)
+    print("[app] cancel:", post("/api/archive/choose-folder/cancel"))
+    t.join(30)
+    print("[app] picker returned:", result)
+    post("/api/system/quit")
+    app.wait(30)
+    return bool(dialog and dialog["topmost"] and result.get("cancelled") is True)
+
+
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "current"
     if which == "no-console-current":
@@ -191,6 +233,9 @@ if __name__ == "__main__":
     if which == "current":
         d = probe_script("current", CURRENT)
         sys.exit(0)        # diagnostic only
-    ok = probe_no_console() if which == "no-console" else probe_module()
+    if which == "app":
+        ok = probe_app(sys.argv[2])
+    else:
+        ok = probe_no_console() if which == "no-console" else probe_module()
     print("RESULT:", "PASS" if ok else "FAIL")
     sys.exit(0 if ok else 1)

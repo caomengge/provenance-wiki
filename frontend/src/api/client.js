@@ -275,6 +275,9 @@ const api = {
   chooseArchiveFolder: () =>
     request('POST', '/api/archive/choose-folder'),
 
+  cancelChooseArchiveFolder: () =>
+    request('POST', '/api/archive/choose-folder/cancel'),
+
   checkArchiveDestination: (path, purpose) =>
     request('POST', '/api/archive/check', { path, purpose }),
 
