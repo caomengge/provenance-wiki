@@ -40,7 +40,8 @@ hiddenimports = (
 if IS_MAC:
     hiddenimports += ["keyring.backends.macOS", "pystray._darwin"]
 if IS_WIN:
-    hiddenimports += ["keyring.backends.Windows", "pystray._win32"]
+    hiddenimports += ["keyring.backends.Windows", "pystray._win32"] \
+        + collect_submodules("win32ctypes")   # Windows Credential Manager access
 
 datas = [
     (os.path.join(ROOT, "dist"), "dist"),                       # built React app

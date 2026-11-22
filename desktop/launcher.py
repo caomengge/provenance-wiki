@@ -36,6 +36,13 @@ APP_ID = "provenance-wiki"
 PREFERRED_PORT = 5100
 
 FROZEN = bool(getattr(sys, "frozen", False))
+
+# A windowed app (no console) has no stdout/stderr on Windows: any library that
+# prints would raise. Send such output nowhere; real logging goes to the log file.
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
 if FROZEN:
     os.environ["PW_PACKAGED"] = "1"
     BACKEND_DIR = Path(sys._MEIPASS)

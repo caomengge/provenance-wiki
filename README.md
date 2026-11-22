@@ -13,16 +13,19 @@ There are two ways to use Provenance Wiki:
 | Computer | Download | Status |
 |---|---|---|
 | **Mac** (Apple Silicon M1 or later, macOS 15+) | [Latest Mac testing build](https://github.com/caomengge/provenance-wiki/actions/workflows/desktop-macos.yml?query=branch%3Amain+is%3Asuccess) | **Testing build**: not yet signed by Apple |
-| **Windows** 10/11 (64-bit) | Coming soon | In preparation |
+| **Windows** 10/11 (64-bit) | [Latest Windows testing build](https://github.com/caomengge/provenance-wiki/actions/workflows/desktop-windows.yml?query=branch%3Amain+is%3Asuccess) | **Testing build**: not yet code-signed |
 
-To download the Mac testing build:
+To download a testing build:
 
 1. Sign in to GitHub (a free account is enough). Downloads are only shown to signed-in users.
-2. Open the link above and click the most recent run (green check mark).
-3. Scroll to **Artifacts** and click **ProvenanceWiki-macOS-arm64-TESTING-ONLY**. You get a `.zip`
-   file containing the `.dmg` installer and a SHA-256 checksum.
-4. Follow the [Mac installation guide](docs/INSTALL_MACOS.md). Because the testing build isn't
-   signed by Apple, you need to allow it once in **System Settings → Privacy & Security**.
+2. Open the link for your computer above and click the most recent run (green check mark).
+3. Scroll to **Artifacts** and click **ProvenanceWiki-macOS-arm64-TESTING-ONLY** (Mac) or
+   **ProvenanceWiki-Windows-x64-TESTING-ONLY** (Windows). You get a `.zip` file containing the
+   installer and a SHA-256 checksum.
+4. Follow the installation guide: [Mac](docs/INSTALL_MACOS.md) · [Windows](docs/INSTALL_WINDOWS.md).
+   Testing builds aren't signed yet, so macOS asks you to allow the app once in
+   **System Settings → Privacy & Security**, and Windows SmartScreen may ask you to click
+   **More info → Run anyway**.
 
 Each build is kept for 30 days; newer builds appear at the same link. Please test with sample
 documents or copies of your material.
