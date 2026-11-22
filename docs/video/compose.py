@@ -73,13 +73,19 @@ PARTS = [("Part 1 of 3 · Install", ["download", "downloads", "smartscreen1", "s
 SHARED_APP = {k: SEGMENTS[k] for k in ("welcome", "archive_create", "archive_other", "archive_done", "keys_paste",
                                        "keys_test", "step3", "step4_open", "photos_folder", "check_again",
                                        "source", "ingest")}
+# Finder and System Settings items can't be located automatically on CI, so their
+# rectangles (1920x1080 screenshots) were measured from the captured images.
+MAC_APP_IN_DMG, MAC_APPS_IN_DMG = [700, 222, 885, 326], [568, 222, 675, 326]
 MAC_SEGMENTS = dict(SHARED_APP, **{
-    "downloads":  [("downloads", "window", [])],
-    "dmg":        [("dmg", "window", [])],
-    "applications": [("applications", "window", [])],
-    "menubar":    [("menubar", "icon", ["icon"])],
-    "menu":       [("menu", "menu+icon", ["menu"])],
-    "reopen":     [("reopen", "window", [])],
+    "downloads":  [("downloads", "window", [[666, 248, 1410, 266]])],
+    "dmg":        [("dmg", "window", [MAC_APP_IN_DMG]),
+                   ("dmg", "window", [MAC_APPS_IN_DMG], {"arrow": [775, 272, 640, 272]})],
+    "applications": [("applications", "window", [[1272, 476, 1384, 588]])],
+    "gatekeeper": [("gatekeeper", "dialog", [[846, 423, 955, 450]])],
+    "settings":   [("settings_scrolled", "window", [[1186, 501, 1286, 521]])],
+    "menubar":    [("menubar", [1100, 0, 1920, 420], ["icon"])],
+    "menu":       [("menu", [1250, 0, 1920, 330], ["menu"])],
+    "reopen":     [("applications", "window", [[1272, 476, 1384, 588]])],
 })
 MAC_PARTS = [("Part 1 of 3 · Install", ["download", "downloads", "dmg", "applications", "gatekeeper", "settings",
                                         "password"]),
@@ -265,12 +271,16 @@ def screen_scene(shots, sid, caption, dur, start_crop):
     plans = []
     prev = start_crop
     cap_top = False
-    for shot_id, focus, hl in segs:
+    for seg in segs:
+        shot_id, focus, hl = seg[:3]
+        extra = seg[3] if len(seg) > 3 else {}
         fbox = shots.box(shot_id, focus)
         target = crop_for(fbox, CAPTION_H)
         hboxes = [shots.box(shot_id, h) for h in hl]
         hboxes = [b for b in hboxes if b]
-        plans.append((shot_id, prev, target, hboxes))
+        arrow = shots.box(shot_id, extra["arrow"]) if extra.get("arrow") else None
+        anchor = ((fbox[0] + fbox[2]) / 2, (fbox[1] + fbox[3]) / 2) if fbox else None
+        plans.append((shot_id, prev, target, hboxes, arrow, anchor))
         for b in hboxes:   # caption would cover the highlight → put it at the top
             if map_box(b, target)[3] > H - CAPTION_H - 20:
                 cap_top = True
@@ -280,26 +290,48 @@ def screen_scene(shots, sid, caption, dur, start_crop):
 
     def frame(i):
         k = min(int(i // per), len(plans) - 1)
-        shot_id, a, b, hboxes = plans[k]
+        shot_id, a, b, hboxes, arrow, anchor = plans[k]
         t = (i - k * per) / FPS
         move = ease(t / 1.1)
         crop = lerp_crop(a, b, move)
         # slow drift after the move, so the picture never looks frozen
         drift = 1 + 0.015 * max(0.0, t - 1.1)
-        cx, cy = (crop[0] + crop[2]) / 2, (crop[1] + crop[3]) / 2
-        hw, hh = (crop[2] - crop[0]) / 2 / drift, (crop[3] - crop[1]) / 2 / drift
-        crop = (cx - hw, cy - hh, cx + hw, cy + hh)
+        # ... zooming towards the thing being shown, so edges near it stay in view
+        ax, ay = anchor if anchor else ((crop[0] + crop[2]) / 2, (crop[1] + crop[3]) / 2)
+        ax = min(max(ax, crop[0]), crop[2]); ay = min(max(ay, crop[1]), crop[3])
+        crop = (ax + (crop[0] - ax) / drift, ay + (crop[1] - ay) / drift,
+                ax + (crop[2] - ax) / drift, ay + (crop[3] - ay) / drift)
         img = shots.image(shot_id).resize((W, H), Image.BICUBIC, box=crop).convert("RGBA")
         if hboxes:
             alpha = ease((t - 1.0) / 0.5)
             if alpha > 0:
                 pulse = 0.5 + 0.5 * math.sin((t - 1.0) * 4)
                 img.alpha_composite(highlight_layer([map_box(bb, crop) for bb in hboxes], alpha, pulse))
+        if arrow:
+            img.alpha_composite(arrow_layer(map_box(arrow, crop), ease((t - 0.9) / 1.2)))
         img.alpha_composite(chip)
         img.alpha_composite(cap)
         return img.convert("RGB")
 
     return frame, n, plans[-1][2]
+
+
+def arrow_layer(line, progress):
+    """A gold arrow drawn from (x0, y0) towards (x1, y1), growing with progress."""
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    if progress <= 0:
+        return layer
+    d = ImageDraw.Draw(layer)
+    x0, y0, x1, y1 = line
+    ex, ey = x0 + (x1 - x0) * progress, y0 + (y1 - y0) * progress
+    d.line((x0, y0, ex, ey), fill=HIL + (255,), width=14)
+    ang = math.atan2(ey - y0, ex - x0)
+    size = 38
+    pts = [(ex + math.cos(ang) * size * 0.6, ey + math.sin(ang) * size * 0.6),
+           (ex + math.cos(ang + 2.5) * size, ey + math.sin(ang + 2.5) * size),
+           (ex + math.cos(ang - 2.5) * size, ey + math.sin(ang - 2.5) * size)]
+    d.polygon(pts, fill=HIL + (255,))
+    return layer
 
 
 # ── Title cards and illustrations ────────────────────────────────────────────

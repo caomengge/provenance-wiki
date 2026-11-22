@@ -45,7 +45,7 @@ def sh(*cmd, **kw):
 
 
 def grab(path):
-    sh("screencapture", "-x", "-C", str(path))
+    sh("screencapture", "-x", str(path))
     return Image.open(path)
 
 
