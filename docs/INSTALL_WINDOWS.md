@@ -36,10 +36,27 @@ You do **not** need Python, Node.js, a command prompt, or any developer tools.
   photographs, logs) is kept in that one folder.
 - It then asks for your two API keys. You can skip those and come back any time via
   **Settings** in the sidebar.
+- Step 4 shows how to add your first photographs (see below).
 
 Closing the browser tab does not stop the app. To stop it, choose **Quit** from the tray icon,
 or **Settings → Quit Provenance Wiki**. Opening it from the Start menu while it is already
 running just opens its page again.
+
+## Adding your photographs
+
+Step **4. Add your photos** on the welcome page (also in **Settings**) walks you through it:
+
+1. **Open photos folder** and copy in photographs of your documents: JPG, PNG, TIFF or WebP,
+   one photograph per page. iPhone photos (HEIC) can't be read yet: export them as JPG first. PDFs: save each page as an image first.
+   Then click **I've added photos: check again**; it shows how many new photographs are ready.
+2. Fill in the **Source** (required): the archive or collection the documents come from, for
+   example "Rijksmuseum Archive, dealer files". It is saved with every document in the batch, so
+   you can cite it and filter by it later. Ingest one source at a time.
+3. Click **Ingest Photos**. Each photograph is sent to Anthropic to be read (billed to your
+   Anthropic account). Progress shows in step 4 and in the sidebar; when it finishes, open the
+   **Gallery** or the **Ingest Log**.
+
+The **Ingest Photos** button in the sidebar does the same thing and uses the same Source.
 
 ## API keys
 

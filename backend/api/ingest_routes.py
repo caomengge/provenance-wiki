@@ -7,6 +7,8 @@ Routes:
   GET  /api/ingest/progress – SSE stream of progress events
 """
 
+from pathlib import Path
+
 from flask import Blueprint, jsonify, request, Response, stream_with_context
 
 from modules.db import get_db, rows_to_list
@@ -21,17 +23,52 @@ def start_ingest():
     from config import PHOTOS_DIR, ANTHROPIC_API_KEY, INGEST_BATCH_SIZE
 
     if not ANTHROPIC_API_KEY:
-        return jsonify({"error": "ANTHROPIC_API_KEY is not set in .env"}), 500
+        return jsonify({"error": "Add your Anthropic API key in Settings first: it is needed to "
+                                 "read the photographs."}), 409
 
     body = request.get_json(silent=True) or {}
     source_archive = (body.get("source_archive") or "").strip()
     if not source_archive:
-        return jsonify({"error": "source_archive is required"}), 400
+        return jsonify({"error": "Enter the Source (where these documents come from) first."}), 400
 
     result = _start(PHOTOS_DIR, ANTHROPIC_API_KEY, INGEST_BATCH_SIZE,
                     source_archive=source_archive)
     status_code = 202 if result["status"] == "started" else 200
     return jsonify(result), status_code
+
+
+@bp.route("/api/ingest/pending", methods=["GET"])
+def ingest_pending():
+    """What is waiting in the photos folder, for the "Add your photos" step.
+
+    Cheap by design (no hashing): "new" = image files whose name isn't already
+    a document's file name. Ingestion itself still de-duplicates by content.
+    Also reports files that can't be ingested (e.g. HEIC from iPhones, PDF).
+    """
+    from config import PHOTOS_DIR, SUPPORTED_EXTS
+    from modules.db import get_db
+    folder = Path(PHOTOS_DIR)
+    images, unsupported = [], {}
+    if folder.is_dir():
+        for entry in folder.iterdir():
+            if not entry.is_file() or entry.name.startswith("."):
+                continue
+            ext = entry.suffix.lower()
+            if ext in SUPPORTED_EXTS:
+                images.append(entry.name)
+            else:
+                unsupported[ext or "(no extension)"] = unsupported.get(ext or "(no extension)", 0) + 1
+    with get_db() as conn:
+        known = {r[0] for r in conn.execute("SELECT filename FROM documents")}
+    new = [n for n in images if n not in known]
+    return jsonify({
+        "folder": str(folder),
+        "images": len(images),
+        "new_images": len(new),
+        "examples": sorted(new)[:5],
+        "unsupported": [{"ext": e, "count": c} for e, c in sorted(unsupported.items())],
+        "supported_exts": sorted(SUPPORTED_EXTS),
+    })
 
 
 @bp.route("/api/ingest/status", methods=["GET"])

@@ -183,6 +183,9 @@ const api = {
     request('DELETE', `/api/group_transactions/${txnId}`),
 
   // ── Ingest ───────────────────────────────────────────────────────────────
+  getPendingPhotos: () =>
+    request('GET', '/api/ingest/pending'),
+
   startIngest: (sourceArchive) =>
     request('POST', '/api/ingest', sourceArchive ? { source_archive: sourceArchive } : undefined),
 
