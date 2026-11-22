@@ -7,7 +7,9 @@
 const BASE = ''   // empty = same origin (served by Flask)
 
 async function request(method, path, body, opts = {}) {
-  const headers = { 'Content-Type': 'application/json', ...opts.headers }
+  // X-Provenance-Wiki marks requests from this app's own UI; the server
+  // refuses state-changing requests without it (cross-site protection).
+  const headers = { 'Content-Type': 'application/json', 'X-Provenance-Wiki': '1', ...opts.headers }
   const res = await fetch(BASE + path, {
     method,
     headers,

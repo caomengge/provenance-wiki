@@ -87,7 +87,11 @@ QA_CONTEXT_DOCS    = 15           # documents retrieved for RAG context
 QA_MAX_TOKENS      = 2048
 
 # ── Flask ─────────────────────────────────────────────────────────────────────
-FLASK_HOST  = "0.0.0.0"
+# Loopback only by default: the server has no login, so it must not be
+# reachable from other computers on the network. Override with FLASK_HOST
+# only if you understand that anyone who can reach the port can read and
+# delete the archive (and also set ALLOWED_HOSTS; see modules/local_security.py).
+FLASK_HOST  = (os.getenv("FLASK_HOST") or "127.0.0.1").strip()
 FLASK_PORT  = int(os.getenv("FLASK_PORT", "5100"))  # 5100 avoids macOS AirPlay on 5000
 FLASK_DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
 
