@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
+import { ArchiveSetupStep, ArchiveSettings } from '../components/ArchiveLocation'
 
 // Settings and first-run setup: API keys (stored in the OS credential store,
 // never in a file), what data leaves the computer, where the archive lives,
@@ -156,6 +157,8 @@ export default function Settings({ onSettingsChanged }) {
 
   const keys = settings.keys || {}
   const bothSet = keys.anthropic?.set && keys.voyage?.set
+  const needsArchive = settings.archive_state === 'setup'
+  const n = (i) => (needsArchive ? i + 1 : i)   // section numbers shift on first launch
 
   return (
     <div style={{ padding: '2rem', maxWidth: '820px' }}>
@@ -170,8 +173,15 @@ export default function Settings({ onSettingsChanged }) {
 
       {error && <div style={{ ...card, borderColor: '#b91c1c', color: '#b91c1c' }}>{error}</div>}
 
+      {needsArchive && (
+        <section style={{ ...card, borderColor: 'var(--gold)' }}>
+          <h2 style={h2}>1. Where to store your archive</h2>
+          <ArchiveSetupStep onDone={changed} />
+        </section>
+      )}
+
       <section style={card}>
-        <h2 style={h2}>1. Your API keys</h2>
+        <h2 style={h2}>{n(1)}. Your API keys</h2>
         <p style={muted}>
           Provenance Wiki uses two AI services, paid for through <strong>your own accounts</strong>.
           These are <strong>API keys</strong> from each provider's developer console. A Claude.ai or
@@ -201,7 +211,7 @@ export default function Settings({ onSettingsChanged }) {
       </section>
 
       <section style={card}>
-        <h2 style={h2}>2. What leaves this computer</h2>
+        <h2 style={h2}>{n(2)}. What leaves this computer</h2>
         <ul style={{ ...muted, margin: '0 0 0.5rem', paddingLeft: '1.2rem' }}>
           <li><strong>Photographs you ingest</strong> are sent to Anthropic to be read and transcribed.</li>
           <li><strong>Document text</strong> (transcriptions and generated descriptions) is sent to Voyage AI to build the search index.</li>
@@ -214,31 +224,23 @@ export default function Settings({ onSettingsChanged }) {
         </p>
       </section>
 
-      <section style={card}>
-        <h2 style={h2}>3. Where your archive is stored</h2>
-        <p style={muted}>
-          To add documents, put photographs in your <strong>Photos folder</strong>, then click
-          <strong> Ingest Photos</strong> in the sidebar.
-        </p>
-        <table style={{ fontSize: '0.84rem', borderCollapse: 'collapse', width: '100%' }}>
-          <tbody>
-            {[['photos', 'Photos folder'], ['data', 'Archive folder (database, thumbnails, backups)'], ['logs', 'Logs']].map(([k, label]) => (
-              <tr key={k}>
-                <td style={{ padding: '0.3rem 0.6rem 0.3rem 0', whiteSpace: 'nowrap', verticalAlign: 'top' }}>{label}</td>
-                <td style={{ padding: '0.3rem 0.6rem', fontFamily: 'monospace', fontSize: '0.78rem', wordBreak: 'break-all' }}>{settings.folders[k]}</td>
-                <td style={{ padding: '0.3rem 0', textAlign: 'right' }}>
-                  <button className="btn btn-ghost" style={small} onClick={() => openFolder(k)}>Open</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p style={{ ...muted, marginTop: '0.5rem' }}>
-          {settings.packaged
-            ? 'Uninstalling the app does not delete this folder. To back up your archive, copy the whole archive folder (it contains your photographs too) while Provenance Wiki is not running.'
-            : 'To back up your archive, copy both the archive folder and the photos folder while Provenance Wiki is not running.'}
-        </p>
-      </section>
+      {!needsArchive && settings.archive_state !== 'missing' && (
+        <section style={card}>
+          <h2 style={h2}>3. Where your archive is stored</h2>
+          <p style={muted}>
+            Your archive (photographs, database, thumbnails, backups and logs) is kept together in one
+            folder. To add documents, put photographs in its <strong>photos</strong> folder
+            (<button type="button" onClick={() => openFolder('photos')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--navy)', textDecoration: 'underline', fontFamily: 'inherit', fontSize: 'inherit' }}>open it</button>),
+            then click <strong>Ingest Photos</strong> in the sidebar.
+          </p>
+          <ArchiveSettings onChanged={changed} />
+          <p style={{ ...muted, marginTop: '0.75rem' }}>
+            {settings.packaged
+              ? 'To back up your archive, copy this whole folder while Provenance Wiki is not running. Uninstalling the app does not delete it.'
+              : 'To back up your archive, copy both the data folder and the photos folder while Provenance Wiki is not running.'}
+          </p>
+        </section>
+      )}
 
       <section style={card}>
         <h2 style={h2}>About</h2>

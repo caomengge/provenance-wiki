@@ -404,7 +404,10 @@ def check_destination(chosen: str, purpose: str, current: Path | None = None,
         result["refusal"] = "Enter a full folder path, e.g. D:\\Research or /Volumes/Archive."
         return result
     is_default = os.path.realpath(chosen_p) == os.path.realpath(default_archive_dir())
-    if not chosen_p.is_dir() and not (purpose == "setup" and is_default):
+    # The interface sends back the final path it was shown (".../Provenance Wiki
+    # Archive"), which doesn't exist yet: its parent must.
+    is_named_new = chosen_p.name == ARCHIVE_DIRNAME and chosen_p.parent.is_dir()
+    if not chosen_p.is_dir() and not (purpose == "setup" and is_default) and not is_named_new:
         result["refusal"] = "That folder doesn't exist. Choose an existing folder."
         return result
 
@@ -513,6 +516,18 @@ def locate_archive(chosen: str, allow_different: bool = False) -> dict:
     _activate(found)
     logger.info("Archive located at %s", found)
     return {"path": str(found), "archive_id": marker["archive_id"]}
+
+
+def retry() -> str:
+    """Look for the archive again (e.g. after reconnecting its drive)."""
+    import config
+    res = resolve()
+    if res["state"] == "ok":
+        _activate(res["path"])
+    else:
+        config.ARCHIVE_STATE = res["state"]
+        config.ARCHIVE_EXPECTED = res["expected"]
+    return config.ARCHIVE_STATE
 
 
 # ── Moving ────────────────────────────────────────────────────────────────────

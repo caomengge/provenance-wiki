@@ -23,6 +23,7 @@ import logging
 import logging.handlers
 import os
 import re
+import secrets
 import signal
 import socket
 import sys
@@ -95,11 +96,16 @@ def setup_logging(log_dir: Path) -> None:
 
 # ── Instance discovery ────────────────────────────────────────────────────────
 
-def probe(port: int, timeout: float = 1.0) -> bool:
-    """True if a Provenance Wiki server answers on this port."""
+def probe(port: int, token: str | None = None, timeout: float = 1.0) -> bool:
+    """True if Provenance Wiki answers on this port, and (when a token is given)
+    it is the instance that wrote our own instance file. Another user on the
+    same computer may run Provenance Wiki too; never hand over to theirs."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=timeout) as r:
-            return json.loads(r.read().decode()).get("app") == APP_ID
+            health = json.loads(r.read().decode())
+        if health.get("app") != APP_ID:
+            return False
+        return token is None or health.get("instance") == token
     except Exception:
         return False
 
@@ -165,8 +171,13 @@ def run_tray(url: str, quit_app, config) -> bool:
         log.exception("Menu-bar/tray icon unavailable")
         return False
 
-    def open_folder(path):
+    def open_folder(which):
         def _open(icon=None, item=None):
+            # Read the location at click time: the archive may have moved.
+            if config.ARCHIVE_STATE != "ok":
+                webbrowser.open(url)          # no archive open: show the app instead
+                return
+            path = Path(getattr(config, which))
             path.mkdir(parents=True, exist_ok=True)
             if sys.platform == "darwin":
                 import subprocess
@@ -182,8 +193,8 @@ def run_tray(url: str, quit_app, config) -> bool:
         "ProvenanceWiki", _icon_image(), "Provenance Wiki",
         menu=pystray.Menu(
             pystray.MenuItem("Open Provenance Wiki", lambda i, it: webbrowser.open(url), default=True),
-            pystray.MenuItem("Open Photos Folder", open_folder(config.PHOTOS_DIR)),
-            pystray.MenuItem("Open Archive Folder", open_folder(config.DATA_DIR)),
+            pystray.MenuItem("Open Photos Folder", open_folder("PHOTOS_DIR")),
+            pystray.MenuItem("Open Archive Folder", open_folder("DATA_DIR")),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Quit Provenance Wiki", on_quit),
         ))
@@ -207,16 +218,21 @@ def run_tray(url: str, quit_app, config) -> bool:
 def main() -> int:
     import config
     setup_logging(config.LOG_DIR)
-    log.info("Provenance Wiki %s starting (packaged=%s, data=%s)",
-             config.APP_VERSION, config.PACKAGED, config.DATA_DIR)
+    # When the archive is created, located or moved, logging follows it.
+    config.ARCHIVE_LISTENERS.append(lambda: setup_logging(config.LOG_DIR))
+    log.info("Provenance Wiki %s starting (packaged=%s, archive=%s, state=%s)",
+             config.APP_VERSION, config.PACKAGED, config.DATA_DIR, config.ARCHIVE_STATE)
 
-    instance_file = config.DATA_DIR / "instance.json"
+    # The fixed config folder, not the archive: the archive may not exist yet or
+    # may be on a drive that isn't connected.
+    config.CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    instance_file = config.CONFIG_DIR / "instance.json"
     existing = read_instance(instance_file)
-    for port in filter(None, [existing and existing.get("port"), PREFERRED_PORT]):
-        if probe(int(port)):
-            log.info("Already running on port %s; opening it", port)
-            open_browser(f"http://127.0.0.1:{port}/")
-            return 0
+    if existing and existing.get("port") and existing.get("token") \
+            and probe(int(existing["port"]), existing["token"]):
+        log.info("Already running on port %s; opening it", existing["port"])
+        open_browser(f"http://127.0.0.1:{existing['port']}/")
+        return 0
 
     from waitress import create_server
     from app import app as flask_app      # runs create_app(): DB init, routes
@@ -226,7 +242,7 @@ def main() -> int:
     except OSError:
         log.info("Port %s is busy; using another free port", PREFERRED_PORT)
         server = create_server(flask_app, host="127.0.0.1", port=0, threads=8)
-    port = server.effective_port
+    port = int(server.effective_port)
     url = f"http://127.0.0.1:{port}/"
 
     stopping = threading.Event()
@@ -268,14 +284,16 @@ def main() -> int:
     threading.Thread(target=serve, name="waitress", daemon=True).start()
 
     deadline = time.time() + 30
-    while not probe(port, timeout=0.5):
+    token = secrets.token_hex(16)
+    flask_app.config["PW_INSTANCE"] = token
+    while not probe(port, token, timeout=0.5):
         if time.time() > deadline:
             log.error("Server did not become ready on port %s", port)
             shutdown()
             return 1
         time.sleep(0.2)
 
-    instance_file.write_text(json.dumps({"port": port, "pid": os.getpid()}))
+    instance_file.write_text(json.dumps({"port": port, "pid": os.getpid(), "token": token}))
     log.info("Ready at %s", url)
     open_browser(url)
 

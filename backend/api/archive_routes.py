@@ -9,6 +9,7 @@ Routes:
   POST /api/archive/check               apply the destination rules to a folder
   POST /api/archive/setup               first launch / start a new archive at a folder
   POST /api/archive/locate              open an existing archive (marker must match unless allowed)
+  POST /api/archive/retry               look for a missing archive again (drive reconnected)
   POST /api/archive/move                start moving the archive
   GET  /api/archive/move/status         progress of the current/last move
   POST /api/archive/move/cancel         cancel a move (nothing changes)
@@ -132,6 +133,15 @@ def locate():
                           "this computer was using.", 409, code="different_archive")
         return _error(str(exc))
     return jsonify({**result, "location": _location_payload(include_size=False)})
+
+
+@bp.route("/api/archive/retry", methods=["POST"])
+def retry():
+    import config
+    if config.ARCHIVE_STATE not in ("missing", "setup"):
+        return jsonify(_location_payload(include_size=False))
+    _al().retry()
+    return jsonify(_location_payload(include_size=False))
 
 
 @bp.route("/api/archive/move", methods=["POST"])

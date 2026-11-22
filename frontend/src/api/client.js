@@ -17,8 +17,11 @@ async function request(method, path, body, opts = {}) {
     signal: opts.signal,
   })
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }))
-    throw new Error(err.error || `HTTP ${res.status}`)
+    const body = await res.json().catch(() => ({ error: res.statusText }))
+    const err = new Error(body.error || `HTTP ${res.status}`)
+    err.status = res.status
+    err.data = body
+    throw err
   }
   return res.json()
 }
@@ -264,6 +267,40 @@ const api = {
 
   quitApp: () =>
     request('POST', '/api/system/quit'),
+
+  // ── Archive location (desktop app) ───────────────────────────────────────
+  getArchiveLocation: (withSize = true) =>
+    request('GET', `/api/archive/location?size=${withSize ? 1 : 0}`),
+
+  chooseArchiveFolder: () =>
+    request('POST', '/api/archive/choose-folder'),
+
+  checkArchiveDestination: (path, purpose) =>
+    request('POST', '/api/archive/check', { path, purpose }),
+
+  setupArchive: (body) =>
+    request('POST', '/api/archive/setup', body),
+
+  locateArchive: (path, allowDifferent = false) =>
+    request('POST', '/api/archive/locate', { path, allow_different: allowDifferent }),
+
+  retryArchive: () =>
+    request('POST', '/api/archive/retry'),
+
+  moveArchive: (path) =>
+    request('POST', '/api/archive/move', { path }),
+
+  getMoveStatus: () =>
+    request('GET', '/api/archive/move/status'),
+
+  cancelMove: () =>
+    request('POST', '/api/archive/move/cancel'),
+
+  deleteOldArchiveCopy: () =>
+    request('POST', '/api/archive/old-copy/delete', { confirm: true }),
+
+  forgetOldArchiveCopy: () =>
+    request('POST', '/api/archive/old-copy/forget'),
 }
 
 export default api

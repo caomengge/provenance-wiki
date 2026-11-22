@@ -70,6 +70,8 @@ def main():
     ap.add_argument("--test-keychain", action="store_true",
                     help="use the real OS credential store: save, check, then remove a dummy key")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
+    ap.add_argument("--archive-flow", action="store_true",
+                    help="first launch, create archive, move it, relaunch, unplug/reconnect")
     args = ap.parse_args()
     cmd = [c for c in args.cmd if c != "--"]
     data = Path(args.data_dir)
@@ -77,10 +79,13 @@ def main():
 
     env = {k: v for k, v in os.environ.items()
            if k not in ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY")}
-    env.update(PW_DATA_DIR=str(data), PW_NO_BROWSER="1", PW_PACKAGED="1",
+    cfg = Path(str(data) + "-config")
+    env.update(PW_DATA_DIR=str(data), PW_CONFIG_DIR=str(cfg), PW_NO_BROWSER="1", PW_PACKAGED="1",
                PW_DISABLE_KEYRING="0" if args.test_keychain else "1")
     if not args.keep_tray:
         env["PW_NO_TRAY"] = "1"
+    if args.archive_flow:
+        return archive_flow(cmd, env, data)
 
     t0 = time.time()
     if args.reopen_app:
@@ -93,8 +98,8 @@ def main():
         proc = None
     else:
         proc = subprocess.Popen(cmd, env=env)
-    inst = wait_for(lambda: (data / "instance.json").exists()
-                    and json.loads((data / "instance.json").read_text()), 90)
+    inst = wait_for(lambda: (cfg / "instance.json").exists()
+                    and json.loads((cfg / "instance.json").read_text()), 90)
     if not check("app starts and records its port", inst, f"{time.time() - t0:.1f}s"):
         if proc:
             proc.kill()
@@ -183,7 +188,7 @@ def main():
     except subprocess.TimeoutExpired:
         p2.kill()
         second_exited = False
-    inst2 = json.loads((data / "instance.json").read_text())
+    inst2 = json.loads((cfg / "instance.json").read_text())
     check("second launch reuses the running app", second_exited and inst2["port"] == port)
 
     s, _, _ = http("POST", base + "/api/system/quit", headers={**UI, "Origin": base})
@@ -215,11 +220,104 @@ def main():
     except OSError:
         stopped = True
     check("server stopped after Quit", stopped)
-    check("instance file removed", not (data / "instance.json").exists())
+    check("instance file removed", not (cfg / "instance.json").exists())
 
     logs = list(Path(st["folders"]["logs"]).glob("*.log"))
     logs = [p for p in logs if p.name != "crash.log" or p.stat().st_size]
     check("log file written", bool(logs), ", ".join(str(p) for p in logs))
+    return finish()
+
+
+def _launch_and_wait(cmd, env, cfg, timeout=90):
+    (cfg / "instance.json").unlink(missing_ok=True)
+    proc = subprocess.Popen(cmd, env=env)
+    inst = wait_for(lambda: (cfg / "instance.json").exists()
+                    and json.loads((cfg / "instance.json").read_text()), timeout)
+    if not inst:
+        proc.kill()
+        return proc, None
+    return proc, f"http://127.0.0.1:{inst['port']}"
+
+
+def _quit(proc, base):
+    http("POST", base + "/api/system/quit", headers={**UI, "Origin": base})
+    try:
+        proc.wait(timeout=20)
+        return True
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        return False
+
+
+def _json(method, url, body=None, base=None):
+    s, _, b = http(method, url, body, {**UI, "Origin": base} if method != "GET" else None)
+    try:
+        return s, json.loads(b)
+    except ValueError:
+        return s, {}
+
+
+def archive_flow(cmd, env, root):
+    """The archive-location story, end to end, through the real launcher."""
+    env = dict(env)
+    env.pop("PW_DATA_DIR", None)
+    cfg = root / "config"
+    default = root / "default archive"
+    dest_parent = root / "External drive ü"
+    dest_parent.mkdir(parents=True, exist_ok=True)
+    env.update(PW_CONFIG_DIR=str(cfg), PW_DEFAULT_ARCHIVE_DIR=str(default))
+
+    proc, base = _launch_and_wait(cmd, env, cfg)
+    if not check("first launch starts", base):
+        return finish()
+    s, h = _json("GET", base + "/api/health")
+    check("first launch asks where to store the archive", h.get("archive_state") == "setup")
+    check("nothing created before choosing", not default.exists())
+    check("archive features wait for setup", http("GET", base + "/api/documents")[0] == 409)
+    s, r = _json("POST", base + "/api/archive/setup", {"use_default": True}, base)
+    check("archive created at the suggested location", s == 200 and (default / "provenance.db").exists())
+
+    con = sqlite3.connect(default / "provenance.db")
+    con.execute("INSERT INTO documents (filename, sha256, title) VALUES ('smoke.jpg','smoke','Smoke letter')")
+    con.commit()
+    con.close()
+    (default / "photos" / "smoke.jpg").write_bytes(os.urandom(200_000))
+
+    s, r = _json("POST", base + "/api/archive/move", {"path": str(dest_parent)}, base)
+    check("move starts", s == 202, r.get("error", ""))
+    status = wait_for(lambda: (_json("GET", base + "/api/archive/move/status")[1]
+                               if _json("GET", base + "/api/archive/move/status")[1].get("phase")
+                               in ("done", "failed", "cancelled") else None), 120) or {}
+    new = dest_parent / "Provenance Wiki Archive"
+    check("move finishes", status.get("phase") == "done", status.get("error") or "")
+    check("photo copied intact",
+          (new / "photos" / "smoke.jpg").exists()
+          and (new / "photos" / "smoke.jpg").read_bytes() == (default / "photos" / "smoke.jpg").read_bytes())
+    s, loc = _json("GET", base + "/api/archive/location?size=0")
+    check("app uses the new location", loc.get("path") == str(new))
+    check("old copy offered for deletion", (loc.get("previous_copy") or {}).get("path") == str(default))
+    s, _ = _json("POST", base + "/api/archive/old-copy/delete", {"confirm": True}, base)
+    check("old copy deleted on confirmation", s == 200 and not default.exists())
+    check("logs follow the archive", any((new / "logs").glob("*.log")))
+    check("quit", _quit(proc, base))
+
+    proc, base = _launch_and_wait(cmd, env, cfg)
+    s, h = _json("GET", base + "/api/health")
+    s, docs = _json("GET", base + "/api/documents")
+    check("relaunch reopens the moved archive",
+          h.get("archive_state") == "ok" and len(docs.get("documents", [])) == 1)
+    check("quit", _quit(proc, base))
+
+    unplugged = root / "unplugged"
+    new.rename(unplugged)
+    proc, base = _launch_and_wait(cmd, env, cfg)
+    s, h = _json("GET", base + "/api/health")
+    check("missing drive is reported, not replaced", h.get("archive_state") == "missing"
+          and not default.exists())
+    unplugged.rename(new)
+    s, r = _json("POST", base + "/api/archive/retry", None, base)
+    check("Try again after reconnecting", r.get("state") == "ok")
+    check("quit", _quit(proc, base))
     return finish()
 
 

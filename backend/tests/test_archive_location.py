@@ -82,12 +82,14 @@ def test_first_launch_creates_nothing_until_a_location_is_chosen(tmp_path):
         out["health"] = get("/api/health")[1]["archive_state"]
         out["docs"] = get("/api/documents")
         out["stats"] = get("/api/stats")[0]
+        out["archives"] = get("/api/archives")[0]
         out["loc"] = get("/api/archive/location")[1]
         out["settings_keys_ok"] = get("/api/settings")[0]
     ''')
     assert out["health"] == "setup"
     assert out["docs"][0] == 409 and out["docs"][1]["archive_state"] == "setup"
     assert out["stats"] == 409
+    assert out["archives"] == 409       # /api/archives (source list) is not /api/archive/
     assert out["loc"]["state"] == "setup" and out["loc"]["path"] is None
     assert out["settings_keys_ok"] == 200
     assert not (tmp_path / "default").exists()
@@ -122,6 +124,27 @@ def test_setup_in_a_chosen_folder_creates_named_subfolder(tmp_path):
     assert (archive / "provenance.db").exists()
     assert out["photos"] == str(archive / "photos")
     assert not (tmp_path / "default").exists()
+
+
+def test_interface_flow_check_then_create_with_the_final_path(tmp_path):
+    """The screens check the chosen folder, then send back the final path they
+    displayed (a subfolder that doesn't exist yet). Same for moving."""
+    chosen = tmp_path / "Big Drive"
+    chosen.mkdir()
+    second = tmp_path / "Second Drive"
+    second.mkdir()
+    out = run(tmp_path, f'''
+        chk = post("/api/archive/check", {{"path": {str(chosen)!r}, "purpose": "setup"}})[1]
+        out["final"] = chk["final_path"]
+        out["setup"] = post("/api/archive/setup", {{"path": chk["final_path"]}})[0]
+        chk2 = post("/api/archive/check", {{"path": {str(second)!r}, "purpose": "move"}})[1]
+        out["move"] = post("/api/archive/move", {{"path": chk2["final_path"]}})[0]
+        out["status"] = wait_move()["phase"]
+        out["now"] = str(config.DATA_DIR)
+    ''')
+    assert out["final"] == str(chosen / "Provenance Wiki Archive")
+    assert out["setup"] == 200 and out["move"] == 202 and out["status"] == "done"
+    assert out["now"] == str(second / "Provenance Wiki Archive")
 
 
 def test_existing_archive_from_an_earlier_build_is_adopted(tmp_path):
@@ -357,6 +380,17 @@ def test_missing_archive_is_never_replaced_silently(tmp_path):
     assert out["docs"] == 409
     assert out["new_without_confirm"] == 409
     assert not (tmp_path / "default").exists()          # nothing created on C:
+
+    # "Try again" after reconnecting the drive while the app is running
+    out = run(tmp_path, f'''
+        out["before"] = get("/api/health")[1]["archive_state"]
+        import shutil
+        shutil.move({str(unplugged)!r}, {str(archive)!r})
+        out["retry"] = post("/api/archive/retry")[1]["state"]
+        out["docs"] = get("/api/documents")[0]
+    ''')
+    assert out["before"] == "missing" and out["retry"] == "ok" and out["docs"] == 200
+    archive.rename(unplugged)                           # unplug again for the next part
 
     # "Locate my archive" — e.g. the drive came back with another letter
     other = tmp_path / "F"

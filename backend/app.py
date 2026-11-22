@@ -17,7 +17,7 @@ from pathlib import Path
 # Allow imports from backend/ directory
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flask import Flask, send_from_directory, jsonify
+from flask import Flask, current_app, send_from_directory, jsonify
 
 logging.basicConfig(
     level=logging.INFO,
@@ -50,7 +50,8 @@ def create_app() -> Flask:
         from flask import request as _rq
         if config.ARCHIVE_STATE == "ok" or not _rq.path.startswith("/api/"):
             return None
-        if _rq.path.startswith(("/api/health", "/api/settings", "/api/archive", "/api/system")):
+        if _rq.path in ("/api/health", "/api/settings") or \
+                _rq.path.startswith(("/api/settings/", "/api/archive/", "/api/system/")):
             return None
         messages = {
             "setup": "Choose where to store your archive first (Settings).",
@@ -191,6 +192,7 @@ def create_app() -> Flask:
             "status": "ok",
             "archive_state": config.ARCHIVE_STATE,
             "app": "provenance-wiki",      # lets the desktop launcher recognise its own server
+            "instance": current_app.config.get("PW_INSTANCE"),
             "version": APP_VERSION,
             "packaged": PACKAGED,
             "testing_build": TESTING_BUILD,
