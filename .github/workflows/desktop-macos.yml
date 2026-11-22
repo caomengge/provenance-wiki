@@ -5,14 +5,14 @@
 # signing credentials are used or needed by this workflow.
 #
 # Run manually (Actions > Desktop build (macOS, testing-only) > Run workflow)
-# or by pushing desktop-related changes to the release branch.
+# or by pushing desktop-related changes to main.
 
 name: Desktop build (macOS, testing-only)
 
 on:
   workflow_dispatch:
   push:
-    branches: [release/cloud-installer-v1]
+    branches: [main]
     paths:
       - backend/**
       - frontend/**
