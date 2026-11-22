@@ -5,7 +5,7 @@ Tests for local-only request protection (run from backend/):
 
 Reproduces the cross-site attack (a foreign website sending DELETE to the
 local server) and DNS rebinding (a foreign Host header), and checks that the
-app's own UI, the Vite dev server and the PDF export form still work.
+app's own UI and the Vite dev server still work.
 """
 
 import os
@@ -98,16 +98,12 @@ def test_dns_rebinding_host_is_refused(client):
     assert r.status_code == 200
 
 
-def test_export_form_works_without_header_but_not_cross_site(client):
+def test_every_api_write_needs_the_ui_header(client):
+    """No exemptions: a plain cross-site form post can't carry the header."""
     c, _ = client
-    foreign = c.post("/api/export/selection", data={"doc_ids": "[1]"},
-                     headers={"Origin": "https://evil.example"})
-    assert foreign.status_code == 403
-    own = c.post("/api/export/selection", data={"doc_ids": "[1]"},
-                 headers={"Origin": OWN})
-    # Past the guard: either a PDF or an export error, never the guard's 403
-    assert own.status_code != 403
-
+    for path in ("/api/tags", "/api/export/selection", "/api/qa", "/api/ingest"):
+        r = c.post(path, data={"x": "1"}, headers={"Origin": OWN})
+        assert r.status_code == 403, path
 
 def test_reads_still_work(client):
     c, _ = client
@@ -134,52 +130,11 @@ def test_client_side_routes_load_on_reload(client):
     assert c.get("/assets/missing.js").status_code == 404
 
 
-def test_export_form_submission_returns_a_pdf(client):
-    """Gallery/Search submit doc_ids as a form field holding a JSON list.
-    The route used to read JSON only, so this returned 'doc_ids is required'."""
+
+def test_pdf_exports_are_gone_and_csv_timeline_remains(client):
     c, _ = client
-    r = c.post("/api/export/selection", data={"doc_ids": "[1]"}, headers={"Origin": OWN})
-    if r.status_code == 500 and b"WeasyPrint" in r.data:
-        pytest.skip("WeasyPrint native libraries not installed")
-    assert r.status_code == 200, r.get_data(as_text=True)[:200]
-    assert r.data[:4] == b"%PDF"
-    assert c.post("/api/export/selection", data={"doc_ids": "nonsense"},
-                  headers={"Origin": OWN}).status_code == 400
-    # the JSON form still works
-    r = c.post("/api/export/selection", json={"doc_ids": [1]},
-               headers={"Origin": OWN, "X-Provenance-Wiki": "1"})
-    assert r.status_code == 200
-
-
-def test_pdf_export_never_fetches_remote_resources():
-    """Exports must not contact web services (previously: Google Fonts)."""
-    import http.server
-    import threading
-    from api import export_routes
-    assert "googleapis" not in export_routes._base_html("t", "b")
-    try:
-        import weasyprint  # noqa: F401
-    except Exception:
-        pytest.skip("WeasyPrint not available")
-    hits = []
-
-    class H(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            hits.append(self.path)
-            self.send_response(404); self.end_headers()
-
-        def log_message(self, *a):
-            pass
-
-    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    u = f"http://127.0.0.1:{srv.server_port}"
-    html = export_routes._base_html(
-        "t", f'<img src="{u}/x.png"/><link rel="stylesheet" href="{u}/x.css"/>'
-             f'<style>@import url("{u}/y.css");</style>')
-    try:
-        pdf = export_routes._render_pdf(html)
-    finally:
-        srv.shutdown()
-    assert pdf[:4] == b"%PDF"
-    assert hits == []
+    assert c.get("/api/export/entity/1").status_code == 404
+    assert c.post("/api/export/selection", json={"doc_ids": [1]},
+                  headers={"Origin": OWN, **UI}).status_code in (404, 405)
+    r = c.get("/api/export/timeline")
+    assert r.status_code == 200 and r.mimetype == "text/csv"

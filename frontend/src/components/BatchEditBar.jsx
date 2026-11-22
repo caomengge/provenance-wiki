@@ -7,8 +7,6 @@
  * Props
  *   selectedIds   Set<number>  — IDs of currently-selected documents
  *   onClear       ()=>void     — exits select mode (clears selection)
- *   onExport      ()=>void     — triggers PDF export of selection
- *   exporting     boolean
  *   archives      string[]     — existing archive names (for autocomplete)
  *   onDone        ()=>void     — called after a successful batch edit so the
  *                               parent can reload its document list
@@ -35,8 +33,6 @@ const PANEL_STYLE = {
 export default function BatchEditBar({
   selectedIds,
   onClear,
-  onExport,
-  exporting   = false,
   archives    = [],
   onDone,
 }) {
@@ -193,14 +189,6 @@ export default function BatchEditBar({
           style={{ fontSize: '0.82rem' }}
         >
           + Add Tag
-        </button>
-
-        <button
-          className="btn btn-gold"
-          onClick={onExport}
-          disabled={exporting || count === 0}
-        >
-          {exporting ? '…' : '↓ Export PDF'}
         </button>
 
         {docIds.length >= 2 && groupIds.length === 0 && (

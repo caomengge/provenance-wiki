@@ -79,9 +79,7 @@ def setup_logging(log_dir: Path) -> None:
         console.setFormatter(fmt)
         root.addHandler(console)
     root.setLevel(logging.INFO)
-    for noisy in ("fontTools", "weasyprint.progress"):
-        logging.getLogger(noisy).setLevel(logging.WARNING)
-    # Native crashes (e.g. in PDF libraries) bypass Python logging; record
+    # Native crashes bypass Python logging; record
     # their Python stack in crash.log so they can be diagnosed.
     import faulthandler
     setup_logging.crash_file = open(log_dir / "crash.log", "a", encoding="utf-8")

@@ -13,7 +13,7 @@ Examples:
 
 Checks: server comes up on loopback only, reports packaged/testing status, keeps
 the archive in the data folder, refuses foreign hosts/origins, serves the app
-for client-side routes, exports a PDF containing the document's text, does not
+for client-side routes, exports the timeline as CSV, does not
 start a second server on a second launch, and stops completely on Quit.
 This is not a substitute for a manual test on a clean machine.
 """
@@ -163,33 +163,16 @@ def main():
                                     for p in log_dir.glob("*.log")), 15)
         check("reopening the running app opens its page", seen)
 
-    # PDF export with a seeded document (no API keys needed)
+    # Export: the timeline downloads as CSV, including non-Latin text
     con = sqlite3.connect(data / "provenance.db")
-    con.execute("INSERT INTO documents (filename, sha256, title, transcription, description) "
-                "VALUES ('smoke.jpg', 'smoke-sha', 'Smoke test letter 致敬', "
-                "'Dear Mr Sickman, the ceiling from Zhihua Temple…', 'A test document')")
+    con.execute("INSERT INTO documents (filename, sha256, title, date_depicted) "
+                "VALUES ('smoke.jpg', 'smoke-sha', '致Sickman函 smoke test', '1934-05-01')")
     con.commit()
-    doc_id = con.execute("SELECT id FROM documents WHERE sha256='smoke-sha'").fetchone()[0]
     con.close()
-    s, hdrs, pdf = http("POST", base + "/api/export/selection",
-                        f"doc_ids=[{doc_id}]".encode(),
-                        {"Origin": base, "Content-Type": "application/x-www-form-urlencoded"},
-                        timeout=180)
-    is_pdf = s == 200 and pdf[:4] == b"%PDF"
-    text_ok = None
-    if is_pdf:
-        try:
-            from pypdf import PdfReader
-            import io
-            text = "".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(pdf)).pages)
-            text_ok = "Smoke test letter" in text
-            # Informational: CJK glyphs depend on the fonts the PDF engine finds.
-            print(f"[INFO] PDF renders Chinese characters: {'致敬' in text}", flush=True)
-        except ImportError:
-            text_ok = None
-    check("PDF export works", is_pdf, f"HTTP {s}, {len(pdf)} bytes")
-    if text_ok is not None:
-        check("PDF contains the document text", text_ok)
+    s, hdrs, body = http("GET", base + "/api/export/timeline")
+    check("timeline CSV export works",
+          s == 200 and "text/csv" in (hdrs.get("Content-Type") or ""), f"HTTP {s}, {len(body)} bytes")
+    check("PDF export removed", http("GET", base + "/api/export/entity/1")[0] == 404)
 
     # Second launch must not start another server
     p2 = subprocess.Popen(cmd, env=env) if not args.reopen_app else \

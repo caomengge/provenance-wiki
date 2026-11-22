@@ -35,7 +35,6 @@ export default function Search() {
   // Selection / batch-edit
   const [selectMode,   setSelectMode]   = useState(false)
   const [selectedIds,  setSelectedIds]  = useState(new Set())
-  const [exporting,    setExporting]    = useState(false)
 
   const PER_PAGE = 20
 
@@ -146,26 +145,6 @@ export default function Search() {
     }
   }
 
-  const exportSelection = async () => {
-    if (selectedIds.size === 0) return
-    setExporting(true)
-    try {
-      const form   = document.createElement('form')
-      form.method  = 'POST'
-      form.action  = '/api/export/selection'
-      form.target  = '_blank'
-      const input  = document.createElement('input')
-      input.type   = 'hidden'
-      input.name   = 'doc_ids'
-      input.value  = JSON.stringify([...selectedIds])
-      form.appendChild(input)
-      document.body.appendChild(form)
-      form.submit()
-      document.body.removeChild(form)
-    } finally {
-      setExporting(false)
-    }
-  }
 
   const totalPages = Math.ceil(total / PER_PAGE)
 
@@ -188,7 +167,7 @@ export default function Search() {
               <button
                 className="btn btn-ghost"
                 onClick={() => setSelectMode(true)}
-                title="Select results to export or batch-edit"
+                title="Select results to batch-edit"
               >
                 ☐ Select
               </button>
@@ -256,8 +235,6 @@ export default function Search() {
             <BatchEditBar
               selectedIds={selectedIds}
               onClear={exitSelectMode}
-              onExport={exportSelection}
-              exporting={exporting}
               archives={archives}
               onDone={() => doSearch(query, page)}
             />

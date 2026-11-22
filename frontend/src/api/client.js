@@ -238,12 +238,6 @@ const api = {
   exportTimelineUrl: (params = {}) =>
     '/api/export/timeline?' + new URLSearchParams(params),
 
-  exportEntityUrl: (entityId) =>
-    `/api/export/entity/${entityId}`,
-
-  exportSelection: (docIds) =>
-    request('POST', '/api/export/selection', { doc_ids: docIds }),
-
   // ── Stats ─────────────────────────────────────────────────────────────────
   getStats: () =>
     request('GET', '/api/stats'),

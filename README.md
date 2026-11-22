@@ -13,7 +13,7 @@ A local research wiki for museum archival provenance research. Processes photos 
 - **Shows a timeline** of ownership events
 - **Draws a network graph** of relationships between people, objects, and institutions
 - **Answers questions** using a RAG (retrieval-augmented generation) pipeline grounded in your documents
-- **Exports PDFs** of timelines, entity histories, and document dossiers
+- **Exports the timeline** as a CSV spreadsheet (opens in Excel or Numbers)
 - **Tracks every ingestion** in a per-run log (processed / failed / re-queued / grouped)
 - **Records edit history** of every document and group, viewable in a Show History panel
 - **Works with Claude Desktop** via the built-in MCP server
@@ -243,11 +243,12 @@ The script is a dry run by default and idempotent (safe to re-run). It also repo
 
 ---
 
-## PDF Export
+## Export
 
-- **Timeline PDF**: Click "Export PDF" on the Timeline page
-- **Entity History**: On any entity detail page, click "Export PDF"
-- **Selected Documents**: In the Gallery, select documents and click "Export Selected (PDF)"
+- **Timeline CSV**: on the Timeline page, click "Export CSV". The current filters apply, and
+  non-Latin names (e.g. Chinese) open correctly in Excel.
+
+PDF export was removed in version 1.0.
 
 ---
 

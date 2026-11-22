@@ -41,9 +41,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install native PDF libraries (build machine only)
-        run: brew install pango
-
       - name: Build frontend
         working-directory: frontend
         run: |
@@ -54,12 +51,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install "pyinstaller>=6.10" pystray pytest pypdf
+          pip install "pyinstaller>=6.10" pystray pytest
 
       - name: Backend tests (macOS)
         working-directory: backend
-        env:
-          DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib
         run: python -m pytest -q
 
       - name: Write build info and icons
@@ -78,8 +73,6 @@ jobs:
           cat build/build_info.json
 
       - name: Build app with PyInstaller
-        env:
-          DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib   # lets the WeasyPrint hook find Pango
         run: |
           pyinstaller desktop/provenance_wiki.spec --noconfirm \
             --distpath build/pyi-dist --workpath build/pyi-work
@@ -97,9 +90,6 @@ jobs:
               echo "Homebrew reference in: $f"; otool -L "$f" | grep "/opt/homebrew\|/usr/local"; bad=1
             fi
           done < <(find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -u+x \) -print0)
-          for lib in libpango-1.0 libgobject-2.0 libharfbuzz libfontconfig; do
-            ls "$APP/Contents/Frameworks" | grep -q "^$lib" || { echo "Missing bundled $lib"; bad=1; }
-          done
           # Nothing private or research-only in the bundle
           if find "$APP" \( -name ".env*" -o -name "*.db" -o -name "experiments" -o -name "experiment*.py*" -o -name "mcp_server*" \) | grep .; then bad=1; fi
           exit $bad

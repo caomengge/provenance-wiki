@@ -33,7 +33,6 @@ export default function Gallery({ onStatsUpdate }) {
   const [keyOnly, setKeyOnly]         = useState(() => searchParams.get('key_evidence') === '1')
   const [selectedIds, setSelectedIds] = useState(new Set())
   const [selectMode, setSelectMode]   = useState(false)
-  const [exporting, setExporting]     = useState(false)
 
   // Filter options
   const [archives,      setArchives]      = useState([])
@@ -154,35 +153,6 @@ export default function Gallery({ onStatsUpdate }) {
     }
   }
 
-  const exportSelection = async () => {
-    if (selectedIds.size === 0) return
-    setExporting(true)
-    try {
-      // Export endpoint currently only supports individual documents
-      const docIds = [...selectedIds]
-        .filter(k => k.startsWith('d:'))
-        .map(k => Number(k.slice(2)))
-      if (docIds.length === 0) {
-        alert('PDF export currently supports individual documents only.')
-        setExporting(false)
-        return
-      }
-      const form   = document.createElement('form')
-      form.method  = 'POST'
-      form.action  = '/api/export/selection'
-      form.target  = '_blank'
-      const input  = document.createElement('input')
-      input.type   = 'hidden'
-      input.name   = 'doc_ids'
-      input.value  = JSON.stringify(docIds)
-      form.appendChild(input)
-      document.body.appendChild(form)
-      form.submit()
-      document.body.removeChild(form)
-    } finally {
-      setExporting(false)
-    }
-  }
 
   const totalPages = perPage === 'all' ? 1 : Math.ceil(total / perPage)
 
@@ -201,8 +171,6 @@ export default function Gallery({ onStatsUpdate }) {
               <BatchEditBar
                 selectedIds={selectedIds}
                 onClear={exitSelectMode}
-                onExport={exportSelection}
-                exporting={exporting}
                 archives={archives}
                 onDone={() => { load(); if (onStatsUpdate) api.getStats().then(onStatsUpdate).catch(() => {}) }}
               />
@@ -211,7 +179,7 @@ export default function Gallery({ onStatsUpdate }) {
                 <button
                   className="btn btn-ghost"
                   onClick={() => setSelectMode(true)}
-                  title="Select documents to export or batch-edit"
+                  title="Select documents to batch-edit"
                 >
                   ☐ Select
                 </button>

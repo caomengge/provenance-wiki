@@ -47,8 +47,6 @@ datas = [
     (os.path.join(BUILD, "build_info.json"), "."),
     (os.path.join(ROOT, "LICENSE"), "."),
 ]
-if IS_MAC:
-    datas.append((os.path.join(SPECPATH, "macos", "fonts.conf"), "fontconfig"))
 
 a = Analysis(
     [os.path.join(SPECPATH, "launcher.py")],
@@ -56,8 +54,8 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
-    runtime_hooks=[os.path.join(SPECPATH, "rthook_native_libs.py")],
-    excludes=EXCLUDED_APP_MODULES + ["mcp", "pytest", "tkinter", "IPython", "matplotlib"],
+    excludes=EXCLUDED_APP_MODULES + ["mcp", "pytest", "tkinter", "IPython", "matplotlib",
+                                     "weasyprint"],   # PDF export removed in v1
     noarchive=False,
 )
 pyz = PYZ(a.pure)

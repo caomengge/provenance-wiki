@@ -99,7 +99,6 @@ import an existing source archive is planned for a later build.
 
 - Not signed or notarized (see above). Expect the one-time "Open Anyway" step.
 - Apple Silicon and macOS 15+ only.
-- The first PDF export can take a little longer while system fonts are indexed.
 - Automatic backup before database upgrades is not yet implemented: test with
   sample documents or copies.
 
