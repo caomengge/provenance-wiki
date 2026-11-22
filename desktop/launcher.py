@@ -79,6 +79,8 @@ def setup_logging(log_dir: Path) -> None:
         console.setFormatter(fmt)
         root.addHandler(console)
     root.setLevel(logging.INFO)
+    for noisy in ("fontTools", "weasyprint.progress"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     # Native crashes (e.g. in PDF libraries) bypass Python logging; record
     # their Python stack in crash.log so they can be diagnosed.
     import faulthandler
@@ -251,7 +253,14 @@ def main() -> int:
     # The Settings "Quit" button: reply to the request first, then stop.
     flask_app.config["PW_QUIT"] = lambda: threading.Timer(0.3, shutdown).start()
 
-    threading.Thread(target=server.run, name="waitress", daemon=True).start()
+    def serve():
+        try:
+            server.run()
+        except OSError:
+            if not stopping.is_set():        # closing the socket on Quit ends the loop
+                log.exception("Server stopped unexpectedly")
+
+    threading.Thread(target=serve, name="waitress", daemon=True).start()
 
     deadline = time.time() + 30
     while not probe(port, timeout=0.5):

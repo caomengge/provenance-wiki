@@ -83,13 +83,24 @@ def main():
         env["PW_NO_TRAY"] = "1"
 
     t0 = time.time()
-    proc = subprocess.Popen(cmd, env=env)
+    if args.reopen_app:
+        # Launch the way Finder does (through LaunchServices), so macOS knows the
+        # app is running and a second open sends it a "reopen" event.
+        envargs = [a for k in ("PW_DATA_DIR", "PW_NO_BROWSER", "PW_PACKAGED",
+                               "PW_DISABLE_KEYRING", "PW_NO_TRAY") if k in env
+                   for a in ("--env", f"{k}={env[k]}")]
+        subprocess.run(["open", *envargs, args.reopen_app], check=False)
+        proc = None
+    else:
+        proc = subprocess.Popen(cmd, env=env)
     inst = wait_for(lambda: (data / "instance.json").exists()
                     and json.loads((data / "instance.json").read_text()), 90)
     if not check("app starts and records its port", inst, f"{time.time() - t0:.1f}s"):
-        proc.kill()
+        if proc:
+            proc.kill()
         return finish()
     port = inst["port"]
+    pid = inst["pid"]
     base = f"http://127.0.0.1:{port}"
 
     s, _, b = http("GET", base + "/api/health")
@@ -144,7 +155,9 @@ def main():
         check("key removed again", s == 200 and json.loads(b)["keys"]["anthropic"]["set"] is False)
 
     if args.reopen_app:
-        subprocess.run(["open", args.reopen_app], check=False)
+        r = subprocess.run(["open", args.reopen_app], capture_output=True, text=True)
+        if r.returncode:
+            print(r.stderr.strip())
         log_dir = Path(st["folders"]["logs"])
         seen = wait_for(lambda: any("Reopen requested" in p.read_text(errors="ignore")
                                     for p in log_dir.glob("*.log")), 15)
@@ -179,7 +192,8 @@ def main():
         check("PDF contains the document text", text_ok)
 
     # Second launch must not start another server
-    p2 = subprocess.Popen(cmd, env=env)
+    p2 = subprocess.Popen(cmd, env=env) if not args.reopen_app else \
+        subprocess.Popen(["open", args.reopen_app])
     try:
         p2.wait(timeout=60)
         second_exited = True
@@ -191,12 +205,26 @@ def main():
 
     s, _, _ = http("POST", base + "/api/system/quit", headers={**UI, "Origin": base})
     check("Quit accepted", s == 200)
-    try:
-        proc.wait(timeout=20)
-        exited = True
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        exited = False
+    def alive(p):
+        if proc is not None and p == proc.pid:
+            return proc.poll() is None        # our child: poll() also reaps it
+        try:
+            os.kill(p, 0)
+            return True
+        except OSError:
+            return False
+
+    exited = bool(wait_for(lambda: not alive(pid), 20))
+    if not exited:
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+    if proc:
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
     check("process exits after Quit", exited)
     try:
         socket.create_connection(("127.0.0.1", port), timeout=1).close()
