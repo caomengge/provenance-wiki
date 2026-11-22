@@ -81,6 +81,8 @@ jobs:
           ln -s /Applications "$STAGE/Applications"
           hdiutil create -volname "Provenance Wiki (Testing)" -srcfolder "$STAGE" -ov -format UDZO \
             "build/ProvenanceWiki-${VERSION}-macOS-arm64-TESTING-ONLY-unsigned.dmg"
+      - name: Screen resolution tool
+        run: brew install jakehilborn/jakehilborn/displayplacer && displayplacer list | head -40 || true
       - name: Capture screenshots
         timeout-minutes: 20
         run: python desktop/macos/capture_install_video.py "$(ls build/*.dmg | head -1)" screens

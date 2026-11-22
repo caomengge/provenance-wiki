@@ -13,6 +13,7 @@ import faulthandler
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import sys
@@ -228,13 +229,21 @@ def install():
     fw = finder_window()
     shot("applications", {"window": fw["box"] if fw else None})
 
-    # First open: macOS checks the app
-    sh("open", str(APP))
+    # First open: macOS checks the app (`open` waits while the dialog is up)
+    subprocess.Popen(["open", str(APP)])
     time.sleep(8)
     log("after first open: " + window_summary())
-    dlg = find_win(lambda w: w["owner"] in ("CoreServicesUIAgent", "UserNotificationCenter") and w["layer"] >= 0, 5)
+    dlg = find_win(lambda w: w["owner"] == "CoreServicesUIAgent", 5)
     shot("gatekeeper", {"dialog": dlg["box"] if dlg else None})
-    sh("pkill", "-x", "CoreServicesUIAgent")
+    if dlg:
+        b = dlg["box"]
+        w, h = b[2] - b[0], b[3] - b[1]
+        click(b[0] + 0.27 * w, b[1] + 0.885 * h)          # "Done"
+        time.sleep(2)
+        still = find_win(lambda w: w["owner"] == "CoreServicesUIAgent", 1)
+        log(f"clicked Done: dialog {'still open' if still else 'closed'}")
+        if still:
+            sh("pkill", "-x", "CoreServicesUIAgent")
     close_finder_windows()
 
     sh("open", "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension")
@@ -243,8 +252,10 @@ def install():
     shot("settings", {"window": sw["box"] if sw else None})
     if sw:
         b = sw["box"]
-        scroll((b[0] + b[2]) * 0.6, (b[1] + b[3]) / 2, 60)
-        time.sleep(2)
+        for _ in range(3):
+            scroll((b[0] + b[2]) * 0.62, (b[1] + b[3]) / 2, 25)
+            time.sleep(1)
+        time.sleep(1.5)
         shot("settings_scrolled", {"window": sw["box"]})
     sh("pkill", "-x", "System Settings")
 
@@ -252,7 +263,7 @@ def install():
     # given on CI: it needs the Mac password), and keep it from opening a browser.
     sh("xattr", "-dr", "com.apple.quarantine", str(APP))
     sh("launchctl", "setenv", "PW_NO_BROWSER", "1")
-    sh("open", str(APP))
+    subprocess.Popen(["open", str(APP)])
 
 
 # ── 2. The app in Chrome ─────────────────────────────────────────────────────
@@ -473,8 +484,27 @@ def reopen():
     shot("reopen", {"window": fw["box"] if fw else None})
 
 
+@step
+def set_resolution():
+    """Use the largest unscaled mode up to 1920 wide (CI Macs start at 1024x768)."""
+    out = sh("displayplacer", "list").stdout
+    sid = re.search(r"Persistent screen id: (\S+)", out)
+    best = None
+    for m in re.finditer(r"mode (\d+): res:(\d+)x(\d+) hz:(\d+)[^\n]*", out):
+        n, w, h = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        line = m.group(0)
+        if w <= 1920 and "scaling:on" not in line and (best is None or w * h > best[1] * best[2]):
+            best = (n, w, h)
+    log(f"displayplacer modes: best={best}")
+    if sid and best:
+        r = sh("displayplacer", f"id:{sid.group(1)} mode:{best[0]}")
+        log(f"displayplacer -> {r.returncode} {r.stdout.strip()} {r.stderr.strip()}")
+        time.sleep(3)
+
+
 if __name__ == "__main__":
     faulthandler.dump_traceback_later(14 * 60, exit=True)
+    set_resolution()
     b = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
     SCALE = grab(OUT / "_probe.png").size[0] / b.size.width
     log(f"screen {b.size.width}x{b.size.height} points, scale {SCALE}")
