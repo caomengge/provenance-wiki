@@ -315,6 +315,12 @@ def app_flow():
     log(f"app at {url}")
     b = Quartz.CGDisplayBounds(Quartz.CGMainDisplayID())
     sw, shh = int(b.size.width), int(b.size.height)
+    # No "Save password?" bubble after typing the dummy keys
+    prof = Path("/tmp/chrome-video/Default")
+    prof.mkdir(parents=True, exist_ok=True)
+    (prof / "Preferences").write_text(json.dumps({
+        "credentials_enable_service": False, "credentials_enable_autosignin": False,
+        "profile": {"password_manager_enabled": False}, "autofill": {"profile_enabled": False}}))
     subprocess.Popen([CHROME, "--user-data-dir=/tmp/chrome-video", "--no-first-run", "--no-default-browser-check",
                       "--remote-debugging-port=9222", "--window-position=0,0", f"--window-size={sw},{shh}",
                       "--disable-features=TranslateUI", url],
@@ -343,7 +349,7 @@ def archive(page):
     other = page.get_by_text("Choose another folder", exact=True).first
     other_box = box_of(page, other.locator("xpath=ancestor::label[1]"))
     other.click()
-    dlg = find_win(lambda w: w["owner"] == "osascript" and w["layer"] == 0, 15)
+    dlg = find_win(lambda w: w["owner"] == "osascript" and w["box"][3] - w["box"][1] > 100, 15)
     time.sleep(1.5)
     log("picker: " + window_summary())
     shot("archive_other", {"button": other_box, "dialog": dlg["box"] if dlg else None})
