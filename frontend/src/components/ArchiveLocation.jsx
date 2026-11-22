@@ -26,14 +26,32 @@ const RED = note('#dc2626', '#fef2f2')
 const AMBER = note('#d97706', '#fffbeb')
 const GREEN = note('#16a34a', '#f0fdf4')
 
+function PickerWaiting() {
+  const isWin = navigator.platform.startsWith('Win')
+  return (
+    <div style={AMBER} role="status">
+      A folder window has opened. If you don’t see it, it may be behind this browser
+      window{isWin ? ': look for it on the taskbar at the bottom of the screen' : ''}.{' '}
+      <button type="button" onClick={() => api.cancelChooseArchiveFolder().catch(() => {})}
+              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit', fontSize: 'inherit', color: 'inherit' }}>
+        Cancel
+      </button>
+    </div>
+  )
+}
+
 // ── Folder chooser with live checking ────────────────────────────────────────
 
 function FolderChooser({ purpose, onResult, autoPick = false }) {
   const [typed, setTyped] = useState('')
   const [typing, setTyping] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [picking, setPicking] = useState(false)
   const [check, setCheck] = useState(null)
   const [msg, setMsg] = useState('')
+  const isWin = navigator.platform.startsWith('Win')
+
+  const cancelPick = () => { api.cancelChooseArchiveFolder().catch(() => {}); setPicking(false) }
 
   const runCheck = async (path) => {
     if (!path) return
@@ -47,14 +65,14 @@ function FolderChooser({ purpose, onResult, autoPick = false }) {
   }
 
   const pick = async () => {
-    setBusy(true); setMsg('')
+    setPicking(true); setMsg('')
     try {
       const res = await api.chooseArchiveFolder()
       if (!res.cancelled && res.path) { setTyped(res.path); await runCheck(res.path) }
     } catch (err) {
       setTyping(true)
       setMsg(err.status === 501 ? 'The folder picker isn\u2019t available here. Type or paste the folder path below.' : err.message)
-    } finally { setBusy(false) }
+    } finally { setPicking(false) }
   }
 
   useEffect(() => { if (autoPick) pick() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -62,9 +80,11 @@ function FolderChooser({ purpose, onResult, autoPick = false }) {
   return (
     <div>
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-        <button className="btn btn-ghost" style={small} onClick={pick} disabled={busy}>
-          {busy ? 'Waiting…' : 'Choose folder…'}
-        </button>
+        {!picking ? (
+          <button className="btn btn-ghost" style={small} onClick={pick} disabled={busy}>Choose folder…</button>
+        ) : (
+          <button className="btn btn-ghost" style={small} onClick={cancelPick}>Cancel folder window</button>
+        )}
         {!typing && (
           <button type="button" onClick={() => setTyping(true)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem',
@@ -73,6 +93,13 @@ function FolderChooser({ purpose, onResult, autoPick = false }) {
           </button>
         )}
       </div>
+      {picking && (
+        <div style={AMBER} role="status">
+          A folder window has opened. If you don’t see it, it may be behind this browser
+          window{isWin ? ': look for it on the taskbar at the bottom of the screen' : ''}.
+          Or type the folder path instead.
+        </div>
+      )}
       {typing && (
         <form onSubmit={e => { e.preventDefault(); runCheck(typed) }}
               style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
@@ -108,6 +135,7 @@ export function ArchiveSetupStep({ location: given, onDone, confirmNew = false }
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [existing, setExisting] = useState('')
+  const [picking, setPicking] = useState(false)
 
   const create = async () => {
     setBusy(true); setError('')
@@ -120,7 +148,7 @@ export function ArchiveSetupStep({ location: given, onDone, confirmNew = false }
   }
 
   const openExisting = async () => {
-    setBusy(true); setError('')
+    setPicking(true); setError('')
     try {
       const res = await api.chooseArchiveFolder()
       const path = res.cancelled ? null : res.path
@@ -128,7 +156,7 @@ export function ArchiveSetupStep({ location: given, onDone, confirmNew = false }
     } catch (err) {
       if (err.status === 501) setMode('existing-typed')
       else setError(err.message)
-    } finally { setBusy(false) }
+    } finally { setPicking(false) }
   }
 
   const openTyped = async () => {
@@ -178,13 +206,14 @@ export function ArchiveSetupStep({ location: given, onDone, confirmNew = false }
         </form>
       )}
       {error && <div style={RED} role="alert">{error}</div>}
+      {picking && <PickerWaiting />}
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginTop: '0.75rem', flexWrap: 'wrap' }}>
         {mode !== 'existing-typed' && (
           <button className="btn btn-primary" style={small} onClick={create} disabled={busy || !ready}>
             {busy ? 'Creating…' : 'Create my archive here'}
           </button>
         )}
-        {!confirmNew && <button type="button" onClick={openExisting} disabled={busy}
+        {!confirmNew && <button type="button" onClick={openExisting} disabled={busy || picking}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.82rem',
                          color: 'var(--text-muted)', textDecoration: 'underline', fontFamily: 'inherit' }}>
           I already have a Provenance Wiki archive (e.g. from another computer)…
@@ -246,12 +275,14 @@ export function ArchiveSettings({ onChanged }) {
     catch (err) { setError(err.message) } finally { setBusy(false) }
   }
 
+  const [picking, setPicking] = useState(false)
   const pickOther = async () => {
-    setError('')
+    setError(''); setPicking(true)
     try {
       const res = await api.chooseArchiveFolder()
       if (!res.cancelled && res.path) setSwitchTo({ path: res.path })
     } catch (err) { setError(err.status === 501 ? 'The folder picker isn’t available here.' : err.message) }
+    finally { setPicking(false) }
   }
 
   const openOther = async () => {
@@ -329,6 +360,7 @@ export function ArchiveSettings({ onChanged }) {
           </button>
         </div>
       )}
+      {picking && <PickerWaiting />}
       {switchTo && (
         <div style={AMBER}>
           Switch to the archive in <span style={mono}>{switchTo.path}</span>? Your current archive stays where it is and
@@ -414,14 +446,15 @@ export function ArchiveMissingScreen({ expectedPath, onResolved }) {
     } finally { setBusy(false) }
   }
 
+  const [picking, setPicking] = useState(false)
   const pickAndLocate = async () => {
-    setBusy(true); setMsg('')
+    setPicking(true); setMsg('')
     try {
       const res = await api.chooseArchiveFolder()
-      setBusy(false)
+      setPicking(false)
       if (!res.cancelled && res.path) await locate(res.path)
     } catch (err) {
-      setBusy(false)
+      setPicking(false)
       if (err.status === 501) setTyping(true); else setMsg(err.message)
     }
   }
@@ -436,8 +469,13 @@ export function ArchiveMissingScreen({ expectedPath, onResolved }) {
 
       <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '1rem 0' }}>
         <button className="btn btn-primary" onClick={retry} disabled={busy}>Try again</button>
-        <button className="btn btn-ghost" onClick={pickAndLocate} disabled={busy}>Locate my archive…</button>
+        <button className="btn btn-ghost" onClick={pickAndLocate} disabled={busy || picking}>Locate my archive…</button>
+        <button type="button" onClick={() => setTyping(true)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem', color: 'var(--text-muted)', textDecoration: 'underline', fontFamily: 'inherit' }}>
+          Type the folder path instead
+        </button>
       </div>
+      {picking && <PickerWaiting />}
       {typing && (
         <form onSubmit={e => { e.preventDefault(); locate(typed) }} style={{ display: 'flex', gap: '0.5rem' }}>
           <input value={typed} onChange={e => setTyped(e.target.value)} aria-label="Archive folder"

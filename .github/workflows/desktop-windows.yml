@@ -147,6 +147,12 @@ jobs:
             | tee build/smoke-test-windows-archive.txt
           exit ${PIPESTATUS[0]}
 
+      - name: Folder picker opens on top and can be cancelled (installed app)
+        run: |
+          python desktop/windows/picker_probe.py app "$LOCALAPPDATA/Programs/Provenance Wiki/ProvenanceWiki.exe" \
+            | tee build/picker-test-windows.txt
+          exit ${PIPESTATUS[0]}
+
       - name: Credential Manager test (dummy key, removed afterwards)
         continue-on-error: true
         run: |

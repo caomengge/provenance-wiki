@@ -775,34 +775,120 @@ class PickerUnavailable(Exception):
     pass
 
 
+_picker_lock = threading.Lock()
+_picker_proc: subprocess.Popen | None = None
+_picker_cancelled = threading.Event()
+
+
+_win_dialog: dict = {}
+
+
+def cancel_folder_picker() -> bool:
+    """Close a folder dialog that is open (or stuck). True if one was closed."""
+    if IS_WIN:
+        hwnd = _win_dialog.get("hwnd")
+        if hwnd:
+            import ctypes
+            ctypes.windll.user32.PostMessageW(hwnd, 0x0010, 0, 0)        # WM_CLOSE
+            return True
+        return False
+    with _picker_lock:
+        proc = _picker_proc
+    if proc is not None and proc.poll() is None:
+        _picker_cancelled.set()
+        proc.kill()
+        return True
+    return False
+
+
+def _win_browse_for_folder(prompt: str) -> str | None:
+    """Windows "Browse For Folder" dialog, opened directly by the app (no
+    PowerShell: security software or IT policy may block or delay an unsigned
+    app that starts PowerShell). Forced always-on-top so it can't hide behind
+    the browser; cancel_folder_picker() closes it."""
+    import ctypes
+    import ctypes.wintypes as wt
+    ole32, shell32, user32 = ctypes.windll.ole32, ctypes.windll.shell32, ctypes.windll.user32
+    BFFCALLBACK = ctypes.WINFUNCTYPE(ctypes.c_int, wt.HWND, wt.UINT, wt.LPARAM, wt.LPARAM)
+
+    class BROWSEINFOW(ctypes.Structure):
+        _fields_ = [("hwndOwner", wt.HWND), ("pidlRoot", ctypes.c_void_p),
+                    ("pszDisplayName", wt.LPWSTR), ("lpszTitle", wt.LPCWSTR),
+                    ("ulFlags", wt.UINT), ("lpfn", BFFCALLBACK),
+                    ("lParam", wt.LPARAM), ("iImage", ctypes.c_int)]
+
+    BIF_RETURNONLYFSDIRS, BIF_EDITBOX, BIF_NEWDIALOGSTYLE = 0x1, 0x10, 0x40
+    BFFM_INITIALIZED, HWND_TOPMOST = 1, wt.HWND(-1)
+    SWP_NOSIZE, SWP_NOMOVE, SWP_SHOWWINDOW = 0x1, 0x2, 0x40
+
+    def on_event(hwnd, msg, _lp, _data):
+        if msg == BFFM_INITIALIZED:
+            _win_dialog["hwnd"] = hwnd
+            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW)
+            user32.SetForegroundWindow(hwnd)
+        return 0
+
+    callback = BFFCALLBACK(on_event)                       # keep a reference
+    display = ctypes.create_unicode_buffer(260)
+    info = BROWSEINFOW(None, None, ctypes.cast(display, wt.LPWSTR), prompt,
+                       BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE | BIF_EDITBOX, callback, 0, 0)
+    shell32.SHBrowseForFolderW.restype = ctypes.c_void_p
+    shell32.SHGetPathFromIDListW.argtypes = [ctypes.c_void_p, wt.LPWSTR]
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    ole32.OleInitialize(None)                              # this thread: single-threaded COM
+    try:
+        pidl = shell32.SHBrowseForFolderW(ctypes.byref(info))
+        if not pidl:
+            return None
+        path = ctypes.create_unicode_buffer(1024)
+        ok = shell32.SHGetPathFromIDListW(pidl, path)
+        ole32.CoTaskMemFree(pidl)
+        return path.value if ok and path.value else None
+    finally:
+        _win_dialog.clear()
+        ole32.OleUninitialize()
+
+
+def _run_picker(cmd: list[str], **kw) -> tuple[int, str, str]:
+    """Run a picker helper. stdin is an empty input, not inherited: the desktop
+    app has no console, and PowerShell can hang on an invalid stdin handle."""
+    global _picker_proc
+    cancel_folder_picker()                     # only one dialog at a time
+    _picker_cancelled.clear()
+    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, **kw)
+    with _picker_lock:
+        _picker_proc = proc
+    try:
+        out, err = proc.communicate(timeout=900)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out, err = proc.communicate()
+    finally:
+        with _picker_lock:
+            if _picker_proc is proc:
+                _picker_proc = None
+    return proc.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
 def choose_folder(prompt: str) -> str | None:
     """Show the system's folder picker on this computer; None if cancelled."""
     if IS_MAC:
         script = f'POSIX path of (choose folder with prompt "{prompt}")'
-        r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=900)
-        if r.returncode != 0:
-            if "-128" in r.stderr or "cancel" in r.stderr.lower():
-                return None
-            raise PickerUnavailable(r.stderr.strip())
-        return r.stdout.strip().rstrip("/") or "/"
+        code, out, err = _run_picker(["osascript", "-e", script])
+        if code != 0:
+            if _picker_cancelled.is_set() or "-128" in err or "cancel" in err.lower():
+                return None                    # cancelled by the user or by the app
+            raise PickerUnavailable(err.strip())
+        return out.strip().rstrip("/") or "/"
     if IS_WIN:
-        ps = (
-            "[Console]::OutputEncoding=[Text.Encoding]::UTF8;"
-            "Add-Type -AssemblyName System.Windows.Forms;"
-            "$f=New-Object System.Windows.Forms.Form -Property @{TopMost=$true};"
-            "$d=New-Object System.Windows.Forms.FolderBrowserDialog;"
-            f"$d.Description='{prompt}';$d.ShowNewFolderButton=$true;"
-            "if($d.ShowDialog($f) -eq 'OK'){ Write-Output $d.SelectedPath }"
-        )
-        r = subprocess.run(["powershell", "-NoProfile", "-STA", "-Command", ps],
-                           capture_output=True, timeout=900,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if r.returncode != 0:
-            raise PickerUnavailable(r.stderr.decode("utf-8", "replace").strip())
-        out = r.stdout.decode("utf-8", "replace").strip()
-        return out or None
+        try:
+            return _win_browse_for_folder(prompt)
+        except Exception as exc:             # never leave the screen without a way forward
+            logger.exception("Windows folder dialog failed")
+            raise PickerUnavailable(str(exc))
     if shutil.which("zenity"):
-        r = subprocess.run(["zenity", "--file-selection", "--directory", f"--title={prompt}"],
-                           capture_output=True, text=True, timeout=900)
-        return r.stdout.strip() or None
+        code, out, _err = _run_picker(["zenity", "--file-selection", "--directory", f"--title={prompt}"])
+        return out.strip() or None
     raise PickerUnavailable("No folder picker available")
