@@ -58,9 +58,9 @@ SEGMENTS = {
     "check_again":    [("check_again", "link+status", ["link"]), ("check_again", "link+status", ["status"])],
     "source":         [("source", "label+input", ["input"])],
     "ingest":         [("ingest", "button+result", ["button"]), ("ingest", "button+result", ["result"])],
-    "tray":           [("tray", "chevron", ["chevron"]), ("tray_open", "icon+overflow", ["icon"])],
+    "tray":           [("tray", "chevron+clock", ["chevron"]), ("tray_open", "icon+clock", ["icon"])],
     "tray_menu":      [("tray_menu", "menu+icon", ["menu"])],
-    "start_menu":     [("start_menu", None, [])],
+    "start_menu":     [("start_menu", [600, 170, 1330, 1040], ["item"])],
 }
 PARTS = [("Part 1 of 3 · Install", ["download", "downloads", "smartscreen1", "smartscreen2", "license",
                                     "infobefore", "selectdir", "tasks", "ready", "finish"]),
@@ -171,6 +171,8 @@ class Shots:
     def box(self, sid, spec):
         if not spec:
             return None
+        if isinstance(spec, list):          # explicit screen rectangle
+            return [float(v) * W / self.meta[sid]["size"][0] for v in spec]
         boxes = self.meta[sid]["boxes"]
         src = self.meta[sid]["size"][0]
         k = W / src
@@ -187,7 +189,7 @@ def crop_for(box, caption_h):
     if not box:
         return (0.0, 0.0, float(W), float(H))
     x0, y0, x1, y1 = box
-    pad = 120
+    pad = 60
     bw, bh = (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad
     usable = (H - caption_h) / H
     cw = max(bw, bh / usable * W / H, W / 1.9)
