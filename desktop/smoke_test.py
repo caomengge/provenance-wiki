@@ -65,6 +65,8 @@ def main():
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--expect-testing-build", action="store_true")
     ap.add_argument("--keep-tray", action="store_true", help="don't set PW_NO_TRAY")
+    ap.add_argument("--test-keychain", action="store_true",
+                    help="use the real OS credential store: save, check, then remove a dummy key")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     args = ap.parse_args()
     cmd = [c for c in args.cmd if c != "--"]
@@ -74,7 +76,7 @@ def main():
     env = {k: v for k, v in os.environ.items()
            if k not in ("ANTHROPIC_API_KEY", "VOYAGE_API_KEY")}
     env.update(PW_DATA_DIR=str(data), PW_NO_BROWSER="1", PW_PACKAGED="1",
-               PW_DISABLE_KEYRING="1")
+               PW_DISABLE_KEYRING="0" if args.test_keychain else "1")
     if not args.keep_tray:
         env["PW_NO_TRAY"] = "1"
 
@@ -125,6 +127,19 @@ def main():
     check("foreign website refused", s == 403)
     s, _, b = http("GET", base + "/entities")
     check("app page loads on a direct link", s == 200 and b'id="root"' in b)
+
+    if args.test_keychain:
+        dummy = "sk-ant-smoke-test-not-a-real-key-000"
+        check("secure key storage available", st.get("secure_store_available") is True,
+              st.get("secure_store_name", ""))
+        s, _, b = http("PUT", base + "/api/settings/keys/anthropic", {"key": dummy},
+                       {**UI, "Origin": base})
+        keys = json.loads(b).get("keys", {}) if s == 200 else {}
+        check("key saved to the credential store",
+              keys.get("anthropic") == {"set": True, "source": "keychain"}, f"HTTP {s}")
+        check("saved key not echoed", dummy.encode() not in b)
+        s, _, b = http("DELETE", base + "/api/settings/keys/anthropic", headers={**UI, "Origin": base})
+        check("key removed again", s == 200 and json.loads(b)["keys"]["anthropic"]["set"] is False)
 
     # PDF export with a seeded document (no API keys needed)
     con = sqlite3.connect(data / "provenance.db")

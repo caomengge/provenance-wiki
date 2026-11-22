@@ -1,0 +1,167 @@
+# Builds the macOS (Apple Silicon) desktop app as a TESTING-ONLY disk image.
+#
+# The app is ad-hoc signed only: not signed with an Apple Developer ID and not
+# notarized, so it is not suitable for public distribution. No API keys or
+# signing credentials are used or needed by this workflow.
+#
+# Run manually (Actions > Desktop build (macOS, testing-only) > Run workflow)
+# or by pushing desktop-related changes to the release branch.
+
+name: Desktop build (macOS, testing-only)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [release/cloud-installer-v1]
+    paths:
+      - backend/**
+      - frontend/**
+      - desktop/**
+      - .github/workflows/desktop-macos.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-14            # Apple Silicon (arm64)
+    timeout-minutes: 60
+    env:
+      PW_DISABLE_KEYRING: "1"    # tests must never touch the runner's Keychain
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install native PDF libraries (build machine only)
+        run: brew install pango
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install "pyinstaller>=6.10" pystray pytest pypdf
+
+      - name: Backend tests (macOS)
+        working-directory: backend
+        env:
+          DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib
+        run: python -m pytest -q
+
+      - name: Write build info and icons
+        run: |
+          mkdir -p build
+          python - <<'PY'
+          import json, os, platform, datetime
+          json.dump({
+              "testing_build": True,
+              "commit": os.environ["GITHUB_SHA"][:7],
+              "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+              "platform": f"macOS-{platform.machine()}",
+          }, open("build/build_info.json", "w"))
+          PY
+          python desktop/make_icons.py build
+          cat build/build_info.json
+
+      - name: Build app with PyInstaller
+        env:
+          DYLD_FALLBACK_LIBRARY_PATH: /opt/homebrew/lib   # lets the WeasyPrint hook find Pango
+        run: |
+          pyinstaller desktop/provenance_wiki.spec --noconfirm \
+            --distpath build/pyi-dist --workpath build/pyi-work
+          ls -la build/pyi-dist
+
+      - name: Verify architecture and self-contained libraries
+        run: |
+          APP="build/pyi-dist/Provenance Wiki (Testing).app"
+          echo "Main executable: $(lipo -archs "$APP/Contents/MacOS/ProvenanceWiki")"
+          lipo -archs "$APP/Contents/MacOS/ProvenanceWiki" | grep -q arm64
+          # No bundled library may depend on Homebrew paths (absent on users' Macs)
+          bad=0
+          while IFS= read -r -d '' f; do
+            if otool -L "$f" 2>/dev/null | tail -n +2 | grep -q "/opt/homebrew\|/usr/local/opt\|/usr/local/Cellar"; then
+              echo "Homebrew reference in: $f"; otool -L "$f" | grep "/opt/homebrew\|/usr/local"; bad=1
+            fi
+          done < <(find "$APP/Contents" -type f \( -name "*.dylib" -o -name "*.so" -o -perm -u+x \) -print0)
+          for lib in libpango-1.0 libgobject-2.0 libharfbuzz libfontconfig; do
+            ls "$APP/Contents/Frameworks" | grep -q "^$lib" || { echo "Missing bundled $lib"; bad=1; }
+          done
+          # Nothing private or research-only in the bundle
+          if find "$APP" \( -name ".env*" -o -name "*.db" -o -name "experiments" -o -name "experiment*.py*" -o -name "mcp_server*" \) | grep .; then bad=1; fi
+          exit $bad
+
+      - name: Ad-hoc sign (testing only, not Developer ID)
+        run: |
+          APP="build/pyi-dist/Provenance Wiki (Testing).app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "Gatekeeper assessment (expected to be rejected: not notarized):"
+          spctl --assess --type execute --verbose "$APP" || true
+
+      - name: Smoke test with Homebrew hidden (simulates a Mac without developer tools)
+        run: |
+          sudo mv /opt/homebrew /opt/homebrew.hidden
+          set +e
+          python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-smoke" --expect-testing-build \
+            -- "build/pyi-dist/Provenance Wiki (Testing).app/Contents/MacOS/ProvenanceWiki" \
+            | tee build/smoke-test-macos.txt
+          status=${PIPESTATUS[0]}
+          sudo mv /opt/homebrew.hidden /opt/homebrew
+          echo "--- app log"; cat "$RUNNER_TEMP/pw-smoke/logs/"*.log | tail -60 || true
+          exit $status
+
+      - name: Keychain test (real macOS Keychain, dummy key, removed afterwards)
+        continue-on-error: true
+        run: |
+          python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-smoke-keychain" --test-keychain \
+            -- "build/pyi-dist/Provenance Wiki (Testing).app/Contents/MacOS/ProvenanceWiki" \
+            | tee build/smoke-test-macos-keychain.txt
+          if security find-generic-password -s ProvenanceWiki -a ANTHROPIC_API_KEY >/dev/null 2>&1; then
+            echo "Dummy key still present in Keychain"; exit 1
+          fi
+
+      - name: Smoke test with the menu-bar icon enabled
+        continue-on-error: true
+        run: |
+          python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-smoke-tray" --expect-testing-build --keep-tray \
+            -- "build/pyi-dist/Provenance Wiki (Testing).app/Contents/MacOS/ProvenanceWiki" \
+            | tee build/smoke-test-macos-tray.txt
+          echo "--- app log"; cat "$RUNNER_TEMP/pw-smoke-tray/logs/"*.log | tail -40 || true
+
+      - name: Create disk image
+        run: |
+          VERSION=$(python -c "import sys; sys.path.insert(0,'backend'); import version; print(version.__version__)")
+          DMG="ProvenanceWiki-${VERSION}-macOS-arm64-TESTING-ONLY-unsigned.dmg"
+          STAGE=build/dmg
+          rm -rf "$STAGE"; mkdir -p "$STAGE"
+          cp -R "build/pyi-dist/Provenance Wiki (Testing).app" "$STAGE/"
+          cp "desktop/macos/READ ME FIRST - TESTING BUILD.txt" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "Provenance Wiki (Testing)" -srcfolder "$STAGE" -ov -format UDZO "build/$DMG"
+          (cd build && shasum -a 256 "$DMG" > "$DMG.sha256")
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+          ls -la build/*.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProvenanceWiki-macOS-arm64-TESTING-ONLY
+          path: |
+            build/${{ env.DMG }}
+            build/${{ env.DMG }}.sha256
+            build/smoke-test-macos*.txt
+          retention-days: 30
+          if-no-files-found: error
