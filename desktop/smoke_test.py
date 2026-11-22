@@ -65,6 +65,8 @@ def main():
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--expect-testing-build", action="store_true")
     ap.add_argument("--keep-tray", action="store_true", help="don't set PW_NO_TRAY")
+    ap.add_argument("--reopen-app", help="macOS: path of the .app; run `open` on it while running "
+                                         "and expect the app to handle the reopen event")
     ap.add_argument("--test-keychain", action="store_true",
                     help="use the real OS credential store: save, check, then remove a dummy key")
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -141,6 +143,13 @@ def main():
         s, _, b = http("DELETE", base + "/api/settings/keys/anthropic", headers={**UI, "Origin": base})
         check("key removed again", s == 200 and json.loads(b)["keys"]["anthropic"]["set"] is False)
 
+    if args.reopen_app:
+        subprocess.run(["open", args.reopen_app], check=False)
+        log_dir = Path(st["folders"]["logs"])
+        seen = wait_for(lambda: any("Reopen requested" in p.read_text(errors="ignore")
+                                    for p in log_dir.glob("*.log")), 15)
+        check("reopening the running app opens its page", seen)
+
     # PDF export with a seeded document (no API keys needed)
     con = sqlite3.connect(data / "provenance.db")
     con.execute("INSERT INTO documents (filename, sha256, title, transcription, description) "
@@ -198,6 +207,7 @@ def main():
     check("instance file removed", not (data / "instance.json").exists())
 
     logs = list(Path(st["folders"]["logs"]).glob("*.log"))
+    logs = [p for p in logs if p.name != "crash.log" or p.stat().st_size]
     check("log file written", bool(logs), ", ".join(str(p) for p in logs))
     return finish()
 

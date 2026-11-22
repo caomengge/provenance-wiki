@@ -26,9 +26,10 @@ def _base_html(title: str, body: str) -> str:
 <head>
 <meta charset="UTF-8"/>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&display=swap');
+  /* Local fonts only: exporting must not contact any web service. EB Garamond
+     is used if installed; Songti/Noto Serif CJK cover Chinese and Japanese. */
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: 'EB Garamond', Georgia, serif; font-size: 11pt; color: #2c2416;
+  body {{ font-family: 'EB Garamond', Georgia, 'Times New Roman', 'Songti SC', 'Noto Serif CJK SC', serif; font-size: 11pt; color: #2c2416;
           margin: 2cm 2.5cm; line-height: 1.6; }}
   h1 {{ font-size: 22pt; margin-bottom: 0.3cm; border-bottom: 2px solid #c9a84c; padding-bottom: 0.2cm; }}
   h2 {{ font-size: 14pt; margin-top: 0.7cm; margin-bottom: 0.2cm; color: #1a2332; }}
@@ -54,11 +55,28 @@ def _base_html(title: str, body: str) -> str:
 </html>"""
 
 
+def _offline_url_fetcher():
+    """A WeasyPrint URL fetcher that refuses every external resource: PDF export
+    must not contact the internet (only Anthropic and Voyage AI are used, and
+    only for extraction, indexing and answers)."""
+    try:
+        from weasyprint import URLFetcher          # WeasyPrint >= 66
+        return URLFetcher(allowed_protocols={"data"})
+    except ImportError:                            # older WeasyPrint
+        from weasyprint import default_url_fetcher
+
+        def fetch(url, *args, **kwargs):
+            if not url.startswith("data:"):
+                raise ValueError("External resources are disabled in PDF export")
+            return default_url_fetcher(url, *args, **kwargs)
+        return fetch
+
+
 def _render_pdf(html: str) -> bytes:
-    """Render HTML to PDF bytes using WeasyPrint."""
+    """Render HTML to PDF bytes using WeasyPrint, without network access."""
     try:
         from weasyprint import HTML
-        return HTML(string=html).write_pdf()
+        return HTML(string=html, url_fetcher=_offline_url_fetcher()).write_pdf()
     except ImportError:
         raise RuntimeError("WeasyPrint is not installed. Run: pip install weasyprint")
 

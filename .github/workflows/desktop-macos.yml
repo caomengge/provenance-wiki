@@ -122,6 +122,12 @@ jobs:
           status=${PIPESTATUS[0]}
           sudo mv /opt/homebrew.hidden /opt/homebrew
           echo "--- app log"; cat "$RUNNER_TEMP/pw-smoke/logs/"*.log | tail -60 || true
+          if [ "$status" != "0" ]; then
+            echo "--- macOS crash reports"
+            for f in ~/Library/Logs/DiagnosticReports/ProvenanceWiki*; do
+              [ -e "$f" ] && { echo "== $f"; head -c 12000 "$f"; echo; }
+            done
+          fi
           exit $status
 
       - name: Keychain test (real macOS Keychain, dummy key, removed afterwards)
@@ -138,6 +144,7 @@ jobs:
         continue-on-error: true
         run: |
           python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-smoke-tray" --expect-testing-build --keep-tray \
+            --reopen-app "build/pyi-dist/Provenance Wiki (Testing).app" \
             -- "build/pyi-dist/Provenance Wiki (Testing).app/Contents/MacOS/ProvenanceWiki" \
             | tee build/smoke-test-macos-tray.txt
           echo "--- app log"; cat "$RUNNER_TEMP/pw-smoke-tray/logs/"*.log | tail -40 || true

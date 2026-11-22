@@ -79,6 +79,11 @@ def setup_logging(log_dir: Path) -> None:
         console.setFormatter(fmt)
         root.addHandler(console)
     root.setLevel(logging.INFO)
+    # Native crashes (e.g. in PDF libraries) bypass Python logging; record
+    # their Python stack in crash.log so they can be diagnosed.
+    import faulthandler
+    setup_logging.crash_file = open(log_dir / "crash.log", "a", encoding="utf-8")
+    faulthandler.enable(file=setup_logging.crash_file, all_threads=True)
 
 
 # ── Instance discovery ────────────────────────────────────────────────────────
@@ -117,6 +122,34 @@ def _icon_image():
     return img
 
 
+def _install_mac_reopen_handler(url: str) -> None:
+    """Double-clicking the app (or its Dock icon) while it is already running
+    sends a 'reopen' Apple event instead of starting a second copy. Answer it
+    by opening the app's page again, so a closed browser tab is easy to recover."""
+    try:
+        import objc
+        from AppKit import NSAppleEventManager
+        from Foundation import NSObject
+
+        def fourcc(code: bytes) -> int:
+            return int.from_bytes(code, "big")
+
+        class ReopenHandler(NSObject):
+            @objc.typedSelector(b"v@:@@")
+            def handleReopen_withReplyEvent_(self, event, reply):
+                log.info("Reopen requested; opening the app page")
+                open_browser(url)
+
+        handler = ReopenHandler.alloc().init()
+        _install_mac_reopen_handler.handler = handler     # keep a reference alive
+        NSAppleEventManager.sharedAppleEventManager() \
+            .setEventHandler_andSelector_forEventClass_andEventID_(
+                handler, b"handleReopen:withReplyEvent:", fourcc(b"aevt"), fourcc(b"rapp"))
+        log.info("Reopen handler installed")
+    except Exception:
+        log.exception("Could not install the reopen handler")
+
+
 def run_tray(url: str, quit_app, config) -> bool:
     """Blocks on the main thread until Quit. Returns False if no tray is possible."""
     try:
@@ -148,8 +181,14 @@ def run_tray(url: str, quit_app, config) -> bool:
             pystray.MenuItem("Quit Provenance Wiki", on_quit),
         ))
     run_tray.icon = icon
+
+    def setup(icon):
+        icon.visible = True
+        if sys.platform == "darwin":
+            _install_mac_reopen_handler(url)
+
     try:
-        icon.run()
+        icon.run(setup=setup)
     except Exception:
         log.exception("Menu-bar/tray icon failed")
         return False

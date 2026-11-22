@@ -149,3 +149,37 @@ def test_export_form_submission_returns_a_pdf(client):
     r = c.post("/api/export/selection", json={"doc_ids": [1]},
                headers={"Origin": OWN, "X-Provenance-Wiki": "1"})
     assert r.status_code == 200
+
+
+def test_pdf_export_never_fetches_remote_resources():
+    """Exports must not contact web services (previously: Google Fonts)."""
+    import http.server
+    import threading
+    from api import export_routes
+    assert "googleapis" not in export_routes._base_html("t", "b")
+    try:
+        import weasyprint  # noqa: F401
+    except Exception:
+        pytest.skip("WeasyPrint not available")
+    hits = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(404); self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    u = f"http://127.0.0.1:{srv.server_port}"
+    html = export_routes._base_html(
+        "t", f'<img src="{u}/x.png"/><link rel="stylesheet" href="{u}/x.css"/>'
+             f'<style>@import url("{u}/y.css");</style>')
+    try:
+        pdf = export_routes._render_pdf(html)
+    finally:
+        srv.shutdown()
+    assert pdf[:4] == b"%PDF"
+    assert hits == []
