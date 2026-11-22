@@ -1,0 +1,37 @@
+# Copies the install-video material (screenshots + narration WAVs) from a run
+# of "Install video material (Windows)" to the orphan branch
+# install-video-material, so it can be fetched with git. Run id comes from
+# docs/video/material-run.txt. Contains no keys or private data.
+
+name: Install video material (copy to branch)
+
+on:
+  push:
+    branches: [docs/install-video]
+    paths: [docs/video/material-run.txt]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read run id
+        run: echo "RUN_ID=$(tr -d '[:space:]' < docs/video/material-run.txt)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ env.RUN_ID }}
+          github-token: ${{ github.token }}
+          path: material
+      - name: Push to install-video-material
+        run: |
+          cd material
+          git init -q -b install-video-material
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Install video material from run $RUN_ID"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" install-video-material

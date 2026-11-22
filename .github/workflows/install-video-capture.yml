@@ -97,6 +97,9 @@ jobs:
                             @("PasswordManagerEnabled",0), @("PromotionalTabsEnabled",0))) {
             New-ItemProperty -Path $p -Name $kv[0] -Value $kv[1] -PropertyType DWord -Force | Out-Null
           }
+      - name: Don't let the app open its own browser (the video opens Edge itself)
+        shell: pwsh
+        run: setx PW_NO_BROWSER 1
       - name: Capture screenshots
         timeout-minutes: 20
         run: python desktop/windows/capture_install_video.py "$(ls build/ProvenanceWiki-Setup-*.exe | head -1)" screens

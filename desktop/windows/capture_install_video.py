@@ -9,6 +9,7 @@ rectangles of the things to highlight. Network calls to Anthropic/Voyage are
 replaced by mocked responses with the app's real wording; the API keys typed
 are dummies. Every step is best-effort: a failure is logged and the rest runs.
 """
+import faulthandler
 import json
 import os
 import random
@@ -199,8 +200,10 @@ def downloads_and_launch():
         shot("downloads", {"file": rect(item), "window": rect(ex)})
     else:
         shot("downloads")
-    os.startfile(str(target))
-    time.sleep(8)
+    # Like a double-click: Explorer opens it (so SmartScreen / security prompts
+    # appear as they would for a researcher, without blocking this script).
+    subprocess.Popen(["explorer.exe", str(target)])
+    time.sleep(10)
     log("windows after launch: " + "; ".join(window_list()))
     shot("after_launch")
 
@@ -572,8 +575,9 @@ def start_menu():
 
 
 if __name__ == "__main__":
+    # A hang prints every thread's stack and exits, instead of a silent CI timeout.
+    faulthandler.dump_traceback_later(14 * 60, exit=True)
     set_resolution()
-    os.environ["PW_NO_BROWSER"] = "1"   # the video opens its own Edge window
     downloads_and_launch()
     wizard()
     step(app_flow)()
