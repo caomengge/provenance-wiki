@@ -1,0 +1,108 @@
+# Material for the Windows install video (docs/video/): screenshots of a real
+# install on a Windows desktop, and the narration (Kokoro TTS, Apache-2.0).
+# Not part of the release build. No real API keys are used: the keys typed in
+# are dummies and the calls that would reach Anthropic/Voyage are mocked.
+
+name: Install video material (Windows)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [docs/install-video]
+    paths:
+      - docs/video/**
+      - desktop/windows/capture_install_video.py
+      - .github/workflows/install-video-capture.yml
+
+permissions:
+  contents: read
+
+jobs:
+  narration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Synthesise narration
+        run: |
+          sudo apt-get install -y -qq espeak-ng > /dev/null
+          pip install -q torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -q "kokoro>=0.9" soundfile
+          python docs/video/make_narration.py docs/video/narration.json narration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: install-video-narration
+          path: narration/
+          retention-days: 14
+
+  screens:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install "pyinstaller>=6.10" pystray pywinauto pillow playwright
+      - name: Build app and installer
+        run: |
+          mkdir -p build
+          python - <<'PY'
+          import json, os, datetime
+          json.dump({"testing_build": True, "commit": os.environ["GITHUB_SHA"][:7],
+                     "built_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
+                     "platform": "Windows-x64"}, open("build/build_info.json", "w"))
+          PY
+          python desktop/make_icons.py build
+          VERSION=$(python -c "import sys; sys.path.insert(0,'backend'); import version; print(version.__version__)")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          pyinstaller desktop/provenance_wiki.spec --noconfirm --distpath build/pyi-dist --workpath build/pyi-work
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc "/DAppVersion=$env:VERSION" "/DTesting=1" "desktop\windows\installer.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Quiet Edge first-run screens
+        shell: pwsh
+        run: |
+          $p = "HKLM:\SOFTWARE\Policies\Microsoft\Edge"
+          New-Item -Path $p -Force | Out-Null
+          foreach ($kv in @(@("HideFirstRunExperience",1), @("BrowserSignin",0), @("HubsSidebarEnabled",0),
+                            @("ShowRecommendationsEnabled",0), @("DefaultBrowserSettingEnabled",0),
+                            @("PasswordManagerEnabled",0), @("PromotionalTabsEnabled",0))) {
+            New-ItemProperty -Path $p -Name $kv[0] -Value $kv[1] -PropertyType DWord -Force | Out-Null
+          }
+      - name: Capture screenshots
+        timeout-minutes: 20
+        run: python desktop/windows/capture_install_video.py "$(ls build/ProvenanceWiki-Setup-*.exe | head -1)" screens
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: install-video-screens
+          path: screens/
+          retention-days: 14
