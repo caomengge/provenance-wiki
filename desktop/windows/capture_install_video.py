@@ -110,6 +110,21 @@ def find_desc(win, pred, control_type=None):
 # ── Setup: screen size, sample photographs ────────────────────────────────────
 
 @step
+def tidy_desktop():
+    """Close or minimise runner windows that would show up in the screenshots."""
+    for w in UIA.windows():
+        try:
+            t, c = w.window_text(), w.class_name()
+            if t == "System Properties":
+                w.close()
+            elif c in ("CASCADIA_HOSTING_WINDOW_CLASS", "ConsoleWindowClass"):
+                win32gui.ShowWindow(w.handle, win32con.SW_MINIMIZE)
+        except Exception:
+            pass
+    time.sleep(1)
+
+
+@step
 def set_resolution():
     dm = win32api.EnumDisplaySettings(None, win32con.ENUM_CURRENT_SETTINGS)
     dm.PelsWidth, dm.PelsHeight = 1920, 1080
@@ -184,9 +199,6 @@ def downloads_and_launch():
     dl.mkdir(exist_ok=True)
     target = dl / SETUP.name
     shutil.copy2(SETUP, target)
-    # Mark it as downloaded from the internet, like a real download.
-    with open(str(target) + ":Zone.Identifier", "w") as f:
-        f.write("[ZoneTransfer]\r\nZoneId=3\r\nHostUrl=https://drive.usercontent.google.com/\r\n")
     keyboard.send_keys("{VK_LWIN down}d{VK_LWIN up}")
     time.sleep(1.5)
     subprocess.Popen(["explorer.exe", "/select,", str(target)])
@@ -200,9 +212,8 @@ def downloads_and_launch():
         shot("downloads", {"file": rect(item), "window": rect(ex)})
     else:
         shot("downloads")
-    # Like a double-click: Explorer opens it (so SmartScreen / security prompts
-    # appear as they would for a researcher, without blocking this script).
-    subprocess.Popen(["explorer.exe", str(target)])
+    # (SmartScreen can't be reproduced on CI: the video shows an illustration.)
+    subprocess.Popen([str(target)])
     time.sleep(10)
     log("windows after launch: " + "; ".join(window_list()))
     shot("after_launch")
@@ -577,7 +588,9 @@ def start_menu():
 if __name__ == "__main__":
     # A hang prints every thread's stack and exits, instead of a silent CI timeout.
     faulthandler.dump_traceback_later(14 * 60, exit=True)
+    os.environ["PW_NO_BROWSER"] = "1"   # the video opens its own Edge window
     set_resolution()
+    tidy_desktop()
     downloads_and_launch()
     wizard()
     step(app_flow)()
