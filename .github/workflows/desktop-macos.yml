@@ -121,11 +121,26 @@ jobs:
             | tee build/smoke-test-macos.txt
           status=${PIPESTATUS[0]}
           sudo mv /opt/homebrew.hidden /opt/homebrew
-          echo "--- app log"; cat "$RUNNER_TEMP/pw-smoke/logs/"*.log | tail -60 || true
+          echo "--- app log"; tail -40 "$RUNNER_TEMP/pw-smoke/logs/provenance-wiki.log" || true
+          echo "--- crash log (native crashes)"; head -80 "$RUNNER_TEMP/pw-smoke/logs/crash.log" 2>/dev/null || true
           if [ "$status" != "0" ]; then
             echo "--- macOS crash reports"
-            for f in ~/Library/Logs/DiagnosticReports/ProvenanceWiki*; do
-              [ -e "$f" ] && { echo "== $f"; head -c 12000 "$f"; echo; }
+            sleep 5
+            find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -name "ProvenanceWiki*" 2>/dev/null | while read -r f; do
+              echo "== $f"; python3 - "$f" <<'PY'
+          import json, sys
+          raw = open(sys.argv[1]).read()
+          try:
+              head, body = raw.split("\n", 1); r = json.loads(body)
+              print("exception:", r.get("exception")); print("termination:", r.get("termination"))
+              imgs = r.get("usedImages", [])
+              ft = r.get("faultingThread", 0)
+              for fr in r["threads"][ft]["frames"][:25]:
+                  img = imgs[fr["imageIndex"]].get("name", "?") if fr.get("imageIndex") is not None else "?"
+                  print(f"  {img:40s} {fr.get('symbol', '')}+{fr.get('symbolLocation', '')}")
+          except Exception as e:
+              print(raw[:6000])
+          PY
             done
           fi
           exit $status
