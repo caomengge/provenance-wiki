@@ -5,6 +5,7 @@
 #    lookups don't search, so resolve bare names there first.
 # 2. Fontconfig was built with the build machine's config path; point it at
 #    a bundled fonts.conf that lists the operating system's font folders.
+# 3. macOS: keep HarfBuzz-subset from loading (see below).
 import os
 import sys
 
@@ -20,6 +21,13 @@ if _base:
         _orig_dlopen = cffi.FFI.dlopen
 
         def _dlopen(self, name, flags=0):
+            # macOS: HarfBuzz-subset crashed the app (bus error) while writing PDFs,
+            # because Pillow ships its own libharfbuzz and the two copies get mixed
+            # in one process. WeasyPrint treats HarfBuzz-subset as optional and then
+            # subsets fonts with fontTools (pure Python), as it does on Linux.
+            if (sys.platform == "darwin" and isinstance(name, str)
+                    and "harfbuzz-subset" in name):
+                raise OSError("HarfBuzz-subset disabled in the macOS app")
             if isinstance(name, str) and os.sep not in name:
                 candidate = os.path.join(_base, name)
                 if os.path.exists(candidate):
