@@ -91,7 +91,7 @@ def main():
     if args.reopen_app:
         # Launch the way Finder does (through LaunchServices), so macOS knows the
         # app is running and a second open sends it a "reopen" event.
-        envargs = [a for k in ("PW_DATA_DIR", "PW_NO_BROWSER", "PW_PACKAGED",
+        envargs = [a for k in ("PW_DATA_DIR", "PW_CONFIG_DIR", "PW_NO_BROWSER", "PW_PACKAGED",
                                "PW_DISABLE_KEYRING", "PW_NO_TRAY") if k in env
                    for a in ("--env", f"{k}={env[k]}")]
         subprocess.run(["open", *envargs, args.reopen_app], check=False)

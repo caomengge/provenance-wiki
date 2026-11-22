@@ -6,8 +6,10 @@
 ;
 ; - Installs for the current user only; no administrator rights needed.
 ; - Program files: %LOCALAPPDATA%\Programs\Provenance Wiki
-;   Research data (separate, never inside the program folder):
-;   %LOCALAPPDATA%\ProvenanceWiki   (database, photographs, logs)
+;   Research data (separate, never inside the program folder): wherever the
+;   researcher chose on first launch (default %LOCALAPPDATA%\ProvenanceWiki);
+;   its location is recorded in %LOCALAPPDATA%\ProvenanceWiki Config and in
+;   HKCU\Software\ProvenanceWiki\ArchivePath.
 ; - Upgrading installs over the previous version; data and keys are kept.
 ; - Uninstalling keeps the research data unless the user explicitly chooses
 ;   to delete it (the uninstaller asks; "No" is the default).
@@ -84,9 +86,21 @@ Filename: "{app}\ProvenanceWiki.exe"; Description: "Open {#AppName} now"; Flags:
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM ProvenanceWiki.exe"; Flags: runhidden; RunOnceId: "StopApp"
 
 [Code]
+// The archive can live anywhere the researcher chose (Settings -> Change
+// location); the app records its path in the registry for this uninstaller.
 function DataDir(): String;
+var
+  P: String;
 begin
-  Result := ExpandConstant('{localappdata}\ProvenanceWiki');
+  if RegQueryStringValue(HKEY_CURRENT_USER, 'Software\ProvenanceWiki', 'ArchivePath', P) and (P <> '') then
+    Result := P
+  else
+    Result := ExpandConstant('{localappdata}\ProvenanceWiki');
+end;
+
+function ConfigDir(): String;
+begin
+  Result := ExpandConstant('{localappdata}\ProvenanceWiki Config');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
@@ -100,7 +114,13 @@ begin
               'This cannot be undone. Choose No to keep it (recommended).',
               mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
     begin
-      DelTree(DataDir(), True, True, True);
+      // Only a folder that really is a Provenance Wiki archive is deleted.
+      if FileExists(AddBackslash(DataDir()) + 'archive.json') or FileExists(AddBackslash(DataDir()) + 'provenance.db') then
+      begin
+        DelTree(DataDir(), True, True, True);
+        DelTree(ConfigDir(), True, True, True);
+        RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'Software\ProvenanceWiki');
+      end;
     end;
   end;
 end;

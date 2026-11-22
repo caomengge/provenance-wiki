@@ -135,6 +135,13 @@ jobs:
           fi
           exit $status
 
+      - name: Archive location story (first launch, choose, move, relaunch, unplug, reconnect)
+        run: |
+          python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-archive-flow" --archive-flow \
+            -- "build/pyi-dist/Provenance Wiki (Testing).app/Contents/MacOS/ProvenanceWiki" \
+            | tee build/smoke-test-macos-archive.txt
+          exit ${PIPESTATUS[0]}
+
       - name: Keychain test (real macOS Keychain, dummy key, removed afterwards)
         continue-on-error: true
         run: |

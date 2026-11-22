@@ -140,6 +140,13 @@ jobs:
           echo "--- crash log"; head -80 "$RUNNER_TEMP/pw-smoke/logs/crash.log" 2>/dev/null || true
           exit $status
 
+      - name: Archive location story (first launch, choose, move, relaunch, unplug, reconnect)
+        run: |
+          EXE="$LOCALAPPDATA/Programs/Provenance Wiki/ProvenanceWiki.exe"
+          python desktop/smoke_test.py --data-dir "$RUNNER_TEMP/pw-archive-flow" --archive-flow -- "$EXE" \
+            | tee build/smoke-test-windows-archive.txt
+          exit ${PIPESTATUS[0]}
+
       - name: Credential Manager test (dummy key, removed afterwards)
         continue-on-error: true
         run: |
@@ -156,31 +163,41 @@ jobs:
             | tee build/smoke-test-windows-tray.txt
           echo "--- app log"; tail -20 "$RUNNER_TEMP/pw-smoke-tray/logs/provenance-wiki.log" || true
 
-      - name: Default data folder is created outside the program folder
+      - name: First launch with real defaults; archive outside the program folder
         run: |
           python - <<'PY'
-          import json, os, subprocess, time, urllib.request
+          import json, os, subprocess, time, urllib.request, winreg
           from pathlib import Path
           local = Path(os.environ["LOCALAPPDATA"])
           exe = local / "Programs" / "Provenance Wiki" / "ProvenanceWiki.exe"
           data = local / "ProvenanceWiki"
-          env = {k: v for k, v in os.environ.items() if k != "PW_DATA_DIR"}
+          cfg = local / "ProvenanceWiki Config"
+          env = {k: v for k, v in os.environ.items() if k not in ("PW_DATA_DIR", "PW_CONFIG_DIR")}
           env.update(PW_NO_BROWSER="1", PW_NO_TRAY="1")
           p = subprocess.Popen([str(exe)], env=env)
           for _ in range(200):
-              if (data / "instance.json").exists():
+              if (cfg / "instance.json").exists():
                   break
               time.sleep(0.3)
-          port = json.loads((data / "instance.json").read_text())["port"]
+          port = json.loads((cfg / "instance.json").read_text())["port"]
           base = f"http://127.0.0.1:{port}"
-          req = urllib.request.Request(base + "/api/system/quit", method="POST",
-                                       headers={"X-Provenance-Wiki": "1", "Origin": base})
-          urllib.request.urlopen(req).read()
+          def call(path, body=None):
+              req = urllib.request.Request(base + path, method="POST" if body is not None else "GET",
+                                           data=json.dumps(body).encode() if body is not None else None,
+                                           headers={"X-Provenance-Wiki": "1", "Origin": base,
+                                                    "Content-Type": "application/json"})
+              return json.loads(urllib.request.urlopen(req).read())
+          assert call("/api/health")["archive_state"] == "setup", "first launch should ask"
+          assert not data.exists(), "nothing may be created before choosing"
+          call("/api/archive/setup", {"use_default": True})
+          call("/api/system/quit", {})
           p.wait(timeout=30)
-          assert (data / "provenance.db").exists(), "database not in %LOCALAPPDATA%\\ProvenanceWiki"
-          assert (data / "photos").is_dir()
-          assert not any((exe.parent).glob("*.db")), "database written into the program folder"
-          print("Archive created at", data)
+          assert (data / "provenance.db").exists() and (data / "photos").is_dir()
+          assert (data / "archive.json").exists()
+          assert not any(exe.parent.glob("*.db")), "database written into the program folder"
+          with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\ProvenanceWiki") as k:
+              assert winreg.QueryValueEx(k, "ArchivePath")[0] == str(data)
+          print("Archive created at", data, "and recorded for the uninstaller")
           PY
 
       - name: Uninstall silently; research data must be kept
