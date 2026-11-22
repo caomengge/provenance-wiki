@@ -27,4 +27,4 @@ Your data
   ~/Library/Logs/ProvenanceWiki                  (logs)
   Deleting the app does not delete your data.
 
-Requirements: a Mac with Apple Silicon (M1 or later), macOS 14 Sonoma or later.
+Requirements: a Mac with Apple Silicon (M1 or later), macOS 15 Sequoia or later.

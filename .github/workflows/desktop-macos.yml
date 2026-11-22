@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   build-macos-arm64:
-    runs-on: macos-14            # Apple Silicon (arm64)
+    runs-on: macos-15            # Apple Silicon (arm64)
     timeout-minutes: 60
     env:
       PW_DISABLE_KEYRING: "1"    # tests must never touch the runner's Keychain

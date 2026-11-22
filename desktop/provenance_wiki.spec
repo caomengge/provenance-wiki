@@ -85,7 +85,7 @@ if IS_MAC:
             "CFBundleName": APP_NAME,
             "CFBundleShortVersionString": __version__,
             "CFBundleVersion": __version__,
-            "LSMinimumSystemVersion": "14.0",
+            "LSMinimumSystemVersion": "15.0",
             "NSHighResolutionCapable": True,
             "NSHumanReadableCopyright": "See LICENSE",
         },
