@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import SemanticUnavailableNotice from '../components/SemanticUnavailableNotice'
 import DocPreviewPanel from '../components/DocPreviewPanel'
 
 const EXAMPLE_QUESTIONS = [
@@ -183,6 +184,7 @@ export default function QA() {
                         </div>
                       )}
 
+                      <SemanticUnavailableNotice retrieval={entry.retrieval} context="qa" />
                       {/* Answer text */}
                       <div style={{
                         background: 'var(--cream-card)',

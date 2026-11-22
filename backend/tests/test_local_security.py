@@ -132,3 +132,20 @@ def test_client_side_routes_load_on_reload(client):
         assert r.status_code == 200 and b"<div id=\"root\"" in r.data, path
     assert c.get("/api/does-not-exist").status_code == 404
     assert c.get("/assets/missing.js").status_code == 404
+
+
+def test_export_form_submission_returns_a_pdf(client):
+    """Gallery/Search submit doc_ids as a form field holding a JSON list.
+    The route used to read JSON only, so this returned 'doc_ids is required'."""
+    c, _ = client
+    r = c.post("/api/export/selection", data={"doc_ids": "[1]"}, headers={"Origin": OWN})
+    if r.status_code == 500 and b"WeasyPrint" in r.data:
+        pytest.skip("WeasyPrint native libraries not installed")
+    assert r.status_code == 200, r.get_data(as_text=True)[:200]
+    assert r.data[:4] == b"%PDF"
+    assert c.post("/api/export/selection", data={"doc_ids": "nonsense"},
+                  headers={"Origin": OWN}).status_code == 400
+    # the JSON form still works
+    r = c.post("/api/export/selection", json={"doc_ids": [1]},
+               headers={"Origin": OWN, "X-Provenance-Wiki": "1"})
+    assert r.status_code == 200

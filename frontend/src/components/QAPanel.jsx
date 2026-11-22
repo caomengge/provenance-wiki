@@ -14,6 +14,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import SemanticUnavailableNotice from './SemanticUnavailableNotice'
 import DocPreviewPanel from './DocPreviewPanel'
 
 const EXAMPLE_QUESTIONS = [
@@ -295,6 +296,7 @@ export default function QAPanel({ isOpen, onClose }) {
                           </div>
                         )}
 
+                        <SemanticUnavailableNotice retrieval={entry.retrieval} context="qa" />
                         {/* Answer bubble */}
                         <div style={{
                           background:   'var(--cream-card)',

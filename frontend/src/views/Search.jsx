@@ -4,12 +4,14 @@ import DocumentCard from '../components/DocumentCard'
 import BatchEditBar from '../components/BatchEditBar'
 import TagFilter from '../components/TagFilter'
 import api from '../api/client'
+import SemanticUnavailableNotice from '../components/SemanticUnavailableNotice'
 
 export default function Search() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery]     = useState(searchParams.get('q') || '')
   const [mode, setMode]       = useState('keyword')
   const [results, setResults] = useState([])
+  const [retrievalInfo, setRetrievalInfo] = useState(null)
   const [total, setTotal]     = useState(0)
   const [page, setPage]       = useState(1)
   const [loading, setLoading] = useState(false)
@@ -73,6 +75,7 @@ export default function Search() {
       if (filterTags.length)   params.tag_id         = filterTags.map(t => t.id)
       const res = await api.search(params)
       setResults(res.results || [])
+      setRetrievalInfo(mode === 'keyword' ? null : { semantic_available: res.semantic_available, semantic_error: res.semantic_error })
       setTotal(res.total || 0)
       setFilenameMatches(res.filename_matches?.matches || [])
       setPage(p)
@@ -306,6 +309,8 @@ export default function Search() {
             ))}
           </div>
         )}
+
+        {!loading && <SemanticUnavailableNotice retrieval={retrievalInfo} />}
 
         {loading ? (
           <div className="loading">Searching…</div>

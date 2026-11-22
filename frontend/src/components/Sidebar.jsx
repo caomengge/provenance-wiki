@@ -11,6 +11,7 @@ const NAV = [
   { to: '/entities', icon: '⬡', label: 'Entities' },
   { to: '/ingest-log', icon: '☰', label: 'Ingest Log', dividerBefore: true },
   { to: '/trash',    icon: '🗑', label: 'Trash' },
+  { to: '/settings', icon: '⚙', label: 'Settings' },
 ]
 
 const styles = {
@@ -274,6 +275,14 @@ export default function Sidebar({ stats }) {
           disabled={ingesting}
         >
           {ingesting ? '⟳ Ingesting…' : '⊕ Ingest Photos'}
+        </button>
+        <button
+          onClick={() => api.openFolder('photos').catch(err => setIngestMsg(err.message))}
+          title="Put photographs here, then click Ingest Photos"
+          style={{ background: 'none', border: 'none', cursor: 'pointer', width: '100%', marginTop: '0.35rem',
+                   fontSize: '0.74rem', color: 'var(--text-light)', fontFamily: 'inherit', textDecoration: 'underline' }}
+        >
+          Open photos folder
         </button>
         {ingestMsg && (
           <div style={{ marginTop: '0.4rem', fontSize: '0.72rem', color: 'var(--text-light)', textAlign: 'center', lineBreak: 'anywhere' }}>

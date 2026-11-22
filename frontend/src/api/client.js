@@ -251,6 +251,25 @@ const api = {
   // ── Health ────────────────────────────────────────────────────────────────
   getHealth: () =>
     request('GET', '/api/health'),
+
+  // ── Settings / desktop app ──────────────────────────────────────────────────
+  getSettings: () =>
+    request('GET', '/api/settings'),
+
+  saveApiKey: (provider, key) =>
+    request('PUT', `/api/settings/keys/${provider}`, { key }),
+
+  removeApiKey: (provider) =>
+    request('DELETE', `/api/settings/keys/${provider}`),
+
+  testApiKey: (provider) =>
+    request('POST', `/api/settings/keys/${provider}/test`),
+
+  openFolder: (which) =>
+    request('POST', '/api/system/open-folder', { which }),
+
+  quitApp: () =>
+    request('POST', '/api/system/quit'),
 }
 
 export default api

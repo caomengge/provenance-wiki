@@ -8,6 +8,7 @@ Routes:
 """
 
 import io
+import json
 import logging
 from datetime import datetime
 
@@ -193,8 +194,19 @@ def export_entity(entity_id):
 def export_selection():
     from modules.db import get_db, rows_to_list
 
+    # Gallery and Search submit a native form (so the PDF opens in a new tab)
+    # with doc_ids as a JSON string; api.exportSelection sends JSON. Accept both.
     data    = request.get_json(silent=True) or {}
-    doc_ids = data.get("doc_ids", [])
+    doc_ids = data.get("doc_ids")
+    if doc_ids is None and request.form.get("doc_ids"):
+        try:
+            doc_ids = json.loads(request.form["doc_ids"])
+        except ValueError:
+            return jsonify({"error": "doc_ids must be a JSON list of document ids"}), 400
+    try:
+        doc_ids = [int(i) for i in (doc_ids or [])]
+    except (TypeError, ValueError):
+        return jsonify({"error": "doc_ids must be a list of document ids"}), 400
 
     if not doc_ids:
         return jsonify({"error": "doc_ids is required"}), 400
