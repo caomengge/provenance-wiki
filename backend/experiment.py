@@ -6,15 +6,15 @@ logs every run to the database, and exports structured results.
 
 Usage (from backend/):
 
-    python experiment.py --queries ../experiments/queries.csv \
+    python experiment.py --queries /path/to/your/queries.csv \
         --modes keyword_original semantic_original semantic_modelled \
-        --top-k 10 --output ../experiments/results/
+        --top-k 10 --output /path/to/results/
 
     # Include MODE D (retrieval logged first, then LLM synthesis):
-    python experiment.py --queries ../experiments/queries.csv \
+    python experiment.py --queries /path/to/your/queries.csv \
         --modes keyword_original semantic_original semantic_modelled rag \
         --rag-retrieval-mode semantic_modelled --top-k 10 \
-        --output ../experiments/results/
+        --output /path/to/results/
 
 queries.csv columns: query_id, query, query_type, notes
 (query_type is free text, e.g. factual / relational / interpretive)
@@ -64,7 +64,8 @@ def main():
                                                    "semantic_modelled"],
                     choices=ALL_MODES)
     ap.add_argument("--top-k", type=int, default=10)
-    ap.add_argument("--output", default="../experiments/results")
+    ap.add_argument("--output", required=True,
+                    help="Directory for results (a timestamped subfolder is created inside it)")
     ap.add_argument("--rag-retrieval-mode", default="semantic_modelled",
                     choices=["keyword_original", "semantic_original", "semantic_modelled"],
                     help="Retrieval condition used inside MODE D")
