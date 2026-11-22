@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import api from '../api/client'
 import { ArchiveSetupStep, ArchiveSettings } from '../components/ArchiveLocation'
+import AddPhotosStep from '../components/AddPhotosStep'
 
 // Settings and first-run setup: API keys (stored in the OS credential store,
 // never in a file), what data leaves the computer, where the archive lives,
@@ -138,8 +139,6 @@ export default function Settings({ onSettingsChanged }) {
 
   const changed = () => { load(); onSettingsChanged && onSettingsChanged() }
 
-  const openFolder = (which) => api.openFolder(which).catch(err => setError(err.message))
-
   const quit = async () => {
     setQuitting(true)
     try { await api.quitApp() } catch (err) { setError(err.message); setQuitting(false) }
@@ -158,7 +157,28 @@ export default function Settings({ onSettingsChanged }) {
   const keys = settings.keys || {}
   const bothSet = keys.anthropic?.set && keys.voyage?.set
   const needsArchive = settings.archive_state === 'setup'
-  const n = (i) => (needsArchive ? i + 1 : i)   // section numbers shift on first launch
+  const archiveOk = settings.archive_state === 'ok'
+  // Welcome page (first launch): 1 storage, 2 keys, 3 what leaves, 4 add photos.
+  // Kept in that order for the whole welcome visit, so numbers don't jump once
+  // the archive is created. Regular Settings: 1 keys, 2 what leaves, 3 storage, 4 add photos.
+  const welcomeOrder = welcome || needsArchive
+  const n = (i) => (welcomeOrder ? i + 1 : i)
+  const storageStep = welcomeOrder ? 1 : 3
+  const storageSection = (
+    <section style={card}>
+      <h2 style={h2}>{storageStep}. Where your archive is stored</h2>
+      <p style={muted}>
+        Your archive (photographs, database, thumbnails, backups and logs) is kept together in one
+        folder. To add documents, see step 4 below.
+      </p>
+      <ArchiveSettings onChanged={changed} />
+      <p style={{ ...muted, marginTop: '0.75rem' }}>
+        {settings.packaged
+          ? 'To back up your archive, copy this whole folder while Provenance Wiki is not running. Uninstalling the app does not delete it.'
+          : 'To back up your archive, copy both the data folder and the photos folder while Provenance Wiki is not running.'}
+      </p>
+    </section>
+  )
 
   return (
     <div style={{ padding: '2rem', maxWidth: '820px' }}>
@@ -179,6 +199,7 @@ export default function Settings({ onSettingsChanged }) {
           <ArchiveSetupStep onDone={changed} />
         </section>
       )}
+      {welcomeOrder && archiveOk && storageSection}
 
       <section style={card}>
         <h2 style={h2}>{n(1)}. Your API keys</h2>
@@ -224,21 +245,15 @@ export default function Settings({ onSettingsChanged }) {
         </p>
       </section>
 
-      {!needsArchive && settings.archive_state !== 'missing' && (
-        <section style={card}>
-          <h2 style={h2}>3. Where your archive is stored</h2>
-          <p style={muted}>
-            Your archive (photographs, database, thumbnails, backups and logs) is kept together in one
-            folder. To add documents, put photographs in its <strong>photos</strong> folder
-            (<button type="button" onClick={() => openFolder('photos')} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--navy)', textDecoration: 'underline', fontFamily: 'inherit', fontSize: 'inherit' }}>open it</button>),
-            then click <strong>Ingest Photos</strong> in the sidebar.
-          </p>
-          <ArchiveSettings onChanged={changed} />
-          <p style={{ ...muted, marginTop: '0.75rem' }}>
-            {settings.packaged
-              ? 'To back up your archive, copy this whole folder while Provenance Wiki is not running. Uninstalling the app does not delete it.'
-              : 'To back up your archive, copy both the data folder and the photos folder while Provenance Wiki is not running.'}
-          </p>
+      {!welcomeOrder && archiveOk && storageSection}
+
+      {settings.archive_state !== 'missing' && (
+        <section id="add-photos" style={{ ...card, ...(welcomeOrder && archiveOk ? { borderColor: 'var(--gold)' } : {}) }}>
+          <h2 style={h2}>4. Add your photos</h2>
+          <AddPhotosStep archiveReady={archiveOk}
+                         anthropicReady={!!keys.anthropic?.set}
+                         archiveStep={storageStep}
+                         keysStep={n(1)} />
         </section>
       )}
 

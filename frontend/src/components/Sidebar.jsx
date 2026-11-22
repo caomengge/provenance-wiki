@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import api from '../api/client'
+import { useIngest } from '../Ingest'
 import { useJobStatus } from '../JobStatus'
 
 const NAV = [
@@ -104,9 +105,9 @@ const styles = {
 }
 
 export default function Sidebar({ stats }) {
-  const [ingesting,       setIngesting]       = useState(false)
-  const [ingestMsg,       setIngestMsg]       = useState('')
-  const [archiveInput,    setArchiveInput]    = useState('')
+  // Shared with Settings → "4. Add your photos" (see Ingest.jsx)
+  const { ingesting, message: ingestMsg, setMessage: setIngestMsg,
+          source: archiveInput, setSource: setArchiveInput, start: startIngest } = useIngest()
   const [showArchive,     setShowArchive]     = useState(false)
   const [archiveSuggestions, setArchiveSuggestions] = useState([])
   const navigate = useNavigate()
@@ -118,44 +119,12 @@ export default function Sidebar({ stats }) {
   }, [])
 
   const handleIngest = async () => {
-    const archive = archiveInput.trim()
-    if (!archive) {
+    if (!archiveInput.trim()) {
       setShowArchive(true)
       setIngestMsg('Source is required before ingesting.')
       return
     }
-    try {
-      setIngesting(true)
-      setIngestMsg('Starting…')
-      const res = await api.startIngest(archive)
-      setIngestMsg(res.message || 'Running…')
-
-      // Listen to SSE progress
-      const evtSrc = new EventSource('/api/ingest/progress')
-      evtSrc.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data)
-          if (data.type === 'done') {
-            setIngestMsg(`Done: ${data.processed} processed`)
-            setIngesting(false)
-            evtSrc.close()
-          } else if (data.type === 'done_file') {
-            setIngestMsg(`${data.completed}/${data.total}: ${data.file}`)
-          } else if (data.type === 'processing') {
-            setIngestMsg(`Processing ${data.file}…`)
-          } else if (data.type === 'error') {
-            setIngestMsg(`Error: ${data.message}`)
-          }
-        } catch {}
-      }
-      evtSrc.onerror = () => {
-        setIngesting(false)
-        evtSrc.close()
-      }
-    } catch (err) {
-      setIngestMsg(err.message)
-      setIngesting(false)
-    }
+    await startIngest(archiveInput)
   }
 
   const activeStyle = {

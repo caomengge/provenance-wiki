@@ -15,6 +15,7 @@ import Settings from './views/Settings'
 import { ArchiveMissingScreen, ArchiveMovingScreen } from './components/ArchiveLocation'
 import QAPanel from './components/QAPanel'
 import { JobStatusProvider } from './JobStatus'
+import { IngestProvider } from './Ingest'
 import api from './api/client'
 
 // First launch of the desktop app with no keys at all: open the setup screen
@@ -108,6 +109,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <JobStatusProvider>
+      <IngestProvider>
       <div className="app-layout">
         <Sidebar stats={stats} />
         <QAPanel isOpen={qaOpen} onClose={() => setQaOpen(false)} />
@@ -160,6 +162,7 @@ export default function App() {
           💬
         </button>
       </div>
+      </IngestProvider>
       </JobStatusProvider>
     </BrowserRouter>
   )

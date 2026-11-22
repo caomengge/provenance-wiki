@@ -38,10 +38,27 @@ You only need to do step 4 once for each new testing version.
   photographs, logs). macOS may ask to allow access to that folder or drive: click **Allow**.
 - It then asks for your two API keys. You can skip those and come back any time via
   **Settings** in the sidebar.
+- Step 4 shows how to add your first photographs (see below).
 
 Closing the browser tab does not stop the app. To stop it, choose **Quit** from the
 menu-bar icon, or **Settings → Quit Provenance Wiki**. If you closed the browser tab
 while the app is still running, use **Open Provenance Wiki** from the menu-bar icon.
+
+## Adding your photographs
+
+Step **4. Add your photos** on the welcome page (also in **Settings**) walks you through it:
+
+1. **Open photos folder** and copy in photographs of your documents: JPG, PNG, TIFF or WebP,
+   one photograph per page. iPhone photos (HEIC) can't be read yet: export them as JPG first. PDFs: save each page as an image first.
+   Then click **I've added photos: check again**; it shows how many new photographs are ready.
+2. Fill in the **Source** (required): the archive or collection the documents come from, for
+   example "Rijksmuseum Archive, dealer files". It is saved with every document in the batch, so
+   you can cite it and filter by it later. Ingest one source at a time.
+3. Click **Ingest Photos**. Each photograph is sent to Anthropic to be read (billed to your
+   Anthropic account). Progress shows in step 4 and in the sidebar; when it finishes, open the
+   **Gallery** or the **Ingest Log**.
+
+The **Ingest Photos** button in the sidebar does the same thing and uses the same Source.
 
 ## API keys
 
@@ -76,8 +93,7 @@ material to these services before processing it.
 | A small settings folder recording where your archive is | `~/Library/Application Support/ProvenanceWiki Config/` |
 
 **Settings → Where your archive is stored** shows the exact location, its size and the free
-space. Use **Open Photos Folder** from the menu-bar icon or the sidebar to add photographs,
-then click **Ingest Photos**.
+space. To add photographs, see [Adding your photographs](#adding-your-photographs).
 
 **Back up** by copying the whole archive folder while the app is not running. It contains both
 the database and the photographs.
