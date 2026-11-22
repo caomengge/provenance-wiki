@@ -27,7 +27,7 @@ To download a testing build:
    **System Settings → Privacy & Security**, and Windows SmartScreen may ask you to click
    **More info → Run anyway**.
 
-Each build is kept for 30 days; newer builds appear at the same link. Please test with sample
+Each build can be downloaded for 90 days; newer builds appear at the same link. Please test with sample
 documents or copies of your material.
 
 You need your own **Anthropic API key** and **Voyage AI API key**. The app asks for them on first

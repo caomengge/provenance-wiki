@@ -202,5 +202,5 @@ jobs:
             build/${{ env.SETUP }}
             build/${{ env.SETUP }}.sha256
             build/smoke-test-windows*.txt
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: error

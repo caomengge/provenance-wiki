@@ -175,5 +175,5 @@ jobs:
             build/${{ env.DMG }}
             build/${{ env.DMG }}.sha256
             build/smoke-test-macos*.txt
-          retention-days: 30
+          retention-days: 90
           if-no-files-found: error
