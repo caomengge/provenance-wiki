@@ -12,6 +12,7 @@ import Entities from './views/Entities'
 import GroupDetail from './views/GroupDetail'
 import IngestLog from './views/IngestLog'
 import Settings from './views/Settings'
+import { ArchiveMissingScreen, ArchiveMovingScreen } from './components/ArchiveLocation'
 import QAPanel from './components/QAPanel'
 import { JobStatusProvider } from './JobStatus'
 import api from './api/client'
@@ -23,13 +24,25 @@ function FirstRunRedirect({ health }) {
   const location = useLocation()
   useEffect(() => {
     if (!health || !health.packaged) return
+    // No archive yet: the setup step is mandatory, on every page.
+    if (health.archive_state === 'setup') {
+      if (location.pathname !== '/settings') navigate('/settings?welcome=1')
+      return
+    }
+    // Archive missing or being moved: its own screen takes priority.
+    if (health.archive_state !== 'ok') return
+    // Having seen the Welcome/Settings page counts as having seen the key setup.
+    if (location.pathname === '/settings') {
+      try { sessionStorage.setItem('pw-setup-shown', '1') } catch { /* storage unavailable */ }
+      return
+    }
     if (health.anthropic_key_set || health.voyage_key_set) return
     let shown = false
     try { shown = sessionStorage.getItem('pw-setup-shown') === '1' } catch { /* storage unavailable */ }
     if (shown || location.pathname === '/settings') return
     try { sessionStorage.setItem('pw-setup-shown', '1') } catch { /* ignore */ }
     navigate('/settings?welcome=1')
-  }, [health]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [health, location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
   return null
 }
 
@@ -59,12 +72,33 @@ function Banners({ health }) {
   )
 }
 
+// When the archive is missing or being moved, every page except Settings is
+// replaced by a screen explaining why (the server refuses archive requests).
+function ArchiveGate({ health, onResolved, children }) {
+  const location = useLocation()
+  if (!health || location.pathname === '/settings') return children
+  if (health.archive_state === 'missing') {
+    return <ArchiveMissingScreenLoader onResolved={onResolved} />
+  }
+  if (health.archive_state === 'moving') return <ArchiveMovingScreen />
+  return children
+}
+
+function ArchiveMissingScreenLoader({ onResolved }) {
+  const [expected, setExpected] = useState('')
+  useEffect(() => { api.getArchiveLocation(false).then(l => setExpected(l.expected_path || '')).catch(() => {}) }, [])
+  return <ArchiveMissingScreen expectedPath={expected} onResolved={onResolved} />
+}
+
 export default function App() {
   const [stats, setStats] = useState(null)
   const [qaOpen, setQaOpen] = useState(false)
 
   const [health, setHealth] = useState(null)
-  const refreshHealth = () => api.getHealth().then(setHealth).catch(() => {})
+  const refreshHealth = () => api.getHealth().then(h => {
+    setHealth(h)
+    if (h.archive_state === 'ok') api.getStats().then(setStats).catch(() => {})
+  }).catch(() => {})
 
   useEffect(() => {
     api.getStats().then(setStats).catch(() => {})
@@ -80,6 +114,7 @@ export default function App() {
         <main className="main-content">
           <FirstRunRedirect health={health} />
           <Banners health={health} />
+          <ArchiveGate health={health} onResolved={refreshHealth}>
           <Routes>
             <Route path="/"            element={<Navigate to="/gallery" replace />} />
             <Route path="/gallery"     element={<Gallery onStatsUpdate={setStats} />} />
@@ -94,6 +129,7 @@ export default function App() {
             <Route path="/ingest-log"  element={<IngestLog />} />
             <Route path="/settings"    element={<Settings onSettingsChanged={refreshHealth} />} />
           </Routes>
+          </ArchiveGate>
         </main>
 
         {/* Floating QA button */}

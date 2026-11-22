@@ -30,7 +30,11 @@ You do **not** need Python, Node.js, a command prompt, or any developer tools.
 - A small **P** icon appears in the system tray at the bottom-right of the screen (you may need
   to click the **^** arrow to see it). Its menu has **Open Provenance Wiki**,
   **Open Photos Folder**, **Open Archive Folder** and **Quit**.
-- The **Welcome** screen asks for your two API keys. You can skip it and come back any time via
+- The **Welcome** screen first asks **where to store your archive**. The suggested location is on
+  your C: drive; if C: is small, choose **Choose another folder** and pick a folder on a larger
+  drive. A folder named `Provenance Wiki Archive` is created there. Everything (database,
+  photographs, logs) is kept in that one folder.
+- It then asks for your two API keys. You can skip those and come back any time via
   **Settings** in the sidebar.
 
 Closing the browser tab does not stop the app. To stop it, choose **Quit** from the tray icon,
@@ -66,16 +70,31 @@ to these services before processing it.
 
 | What | Location |
 |---|---|
-| The program | `%LOCALAPPDATA%\Programs\Provenance Wiki\` |
-| Your archive (database, photographs, thumbnails) | `%LOCALAPPDATA%\ProvenanceWiki\` |
-| Photos to ingest | `%LOCALAPPDATA%\ProvenanceWiki\photos\` |
-| Logs | `%LOCALAPPDATA%\ProvenanceWiki\logs\` |
+| The program | `%LOCALAPPDATA%\Programs\Provenance Wiki\` (about 200 MB; does not grow) |
+| Your archive: database, photographs (`photos\`), thumbnails, backups, logs | The folder you chose on first launch. Suggested: `%LOCALAPPDATA%\ProvenanceWiki\` |
+| A small settings folder recording where your archive is | `%LOCALAPPDATA%\ProvenanceWiki Config\` |
 
-Tip: paste `%LOCALAPPDATA%\ProvenanceWiki` into the File Explorer address bar to open the
-archive folder, or use **Open Archive Folder** from the tray icon.
+**Settings → Where your archive is stored** shows the exact location, its size and the free
+space, with an **Open** button. **Open Archive Folder** in the tray menu does the same.
 
-**Back up** by copying the whole `%LOCALAPPDATA%\ProvenanceWiki` folder while the app is not
-running. It contains both the database and the photographs.
+**Back up** by copying the whole archive folder while the app is not running. It contains both
+the database and the photographs.
+
+### Moving your archive to another drive
+
+Photographs take most of the space (roughly 5–15 GB per 1,000 photos). To move the archive to a
+larger or external drive: **Settings → Where your archive is stored → Change location…**, choose a
+folder, check the summary, and click **Copy and switch**. Provenance Wiki copies everything,
+checks the copy file by file, and only then switches to it; if anything goes wrong, nothing
+changes. Afterwards it offers to delete the old copy (you confirm first).
+
+Folders synced by OneDrive, Google Drive, Dropbox, iCloud Drive or Box, and network drives, are
+not allowed: syncing can corrupt the archive's database.
+
+If the archive is on an external drive that isn't connected when you open Provenance Wiki, it
+says so and offers **Try again** (after connecting the drive) or **Locate my archive…** (if the
+drive or folder now has a different name). It never starts a new, empty archive without asking.
+
 
 ## Upgrade
 
@@ -87,7 +106,7 @@ Wiki is running, the installer closes it first.
 **Settings → Apps → Installed apps → Provenance Wiki (Testing) → Uninstall.**
 
 The uninstaller removes the program and shortcuts. It then asks whether to also delete your
-research archive. **No** is the default and keeps it. Choose **Yes** only if you are sure:
+research archive, wherever you stored it. **No** is the default and keeps it. Choose **Yes** only if you are sure:
 deletion cannot be undone. API keys stay in Credential Manager until you remove them in
 Settings (before uninstalling) or in Windows Credential Manager.
 
