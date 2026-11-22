@@ -4,6 +4,38 @@ A local research wiki for museum archival provenance research. Processes photos 
 
 ---
 
+## Get Provenance Wiki
+
+There are two ways to use Provenance Wiki:
+
+**A. For researchers: download the app (no coding required)**
+
+| Computer | Download | Status |
+|---|---|---|
+| **Mac** (Apple Silicon M1 or later, macOS 15+) | [Latest Mac testing build](https://github.com/caomengge/provenance-wiki/actions/workflows/desktop-macos.yml?query=branch%3Amain+is%3Asuccess) | **Testing build**: not yet signed by Apple |
+| **Windows** 10/11 (64-bit) | Coming soon | In preparation |
+
+To download the Mac testing build:
+
+1. Sign in to GitHub (a free account is enough). Downloads are only shown to signed-in users.
+2. Open the link above and click the most recent run (green check mark).
+3. Scroll to **Artifacts** and click **ProvenanceWiki-macOS-arm64-TESTING-ONLY**. You get a `.zip`
+   file containing the `.dmg` installer and a SHA-256 checksum.
+4. Follow the [Mac installation guide](docs/INSTALL_MACOS.md). Because the testing build isn't
+   signed by Apple, you need to allow it once in **System Settings → Privacy & Security**.
+
+Each build is kept for 30 days; newer builds appear at the same link. Please test with sample
+documents or copies of your material.
+
+You need your own **Anthropic API key** and **Voyage AI API key**. The app asks for them on first
+launch and stores them in your computer's secure key storage. Your archive stays on your computer;
+photographs and document text are sent to Anthropic and Voyage AI for processing.
+
+**B. For developers: run from source.** See [Quick Start](#quick-start) below. You'll need both an
+`ANTHROPIC_API_KEY` and a `VOYAGE_API_KEY` in your `.env` file (see `.env.example`).
+
+---
+
 ## What This Does
 
 - **Ingests photos** of auction catalogs, receipts, letters, and other provenance documents
