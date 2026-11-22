@@ -142,8 +142,52 @@ def probe_no_console():
     return bool(dialog and dialog["topmost"] and result and result["value"] is None and not result["alive"])
 
 
+def probe_no_console_current():
+    """The shipped code path (subprocess.run, inherited stdin) from a process
+    without a console: does the dialog ever appear?"""
+    import json
+    import tempfile
+    out = Path(tempfile.mkdtemp()) / "result.json"
+    code = (
+        "import subprocess, json, time\n"
+        f"ps = {CURRENT!r}\n"
+        "t0 = time.time()\n"
+        "try:\n"
+        "    r = subprocess.run(['powershell','-NoProfile','-STA','-Command',ps], capture_output=True, timeout=25,\n"
+        "                       creationflags=subprocess.CREATE_NO_WINDOW)\n"
+        "    res = {'exit': r.returncode, 'stderr': r.stderr.decode('utf-8','replace')[-300:]}\n"
+        "except subprocess.TimeoutExpired:\n"
+        "    res = {'timeout': True}\n"
+        "res['seconds'] = round(time.time() - t0, 1)\n"
+        f"open({str(out)!r}, 'w').write(json.dumps(res))\n"
+    )
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    p = subprocess.Popen([str(pythonw), "-c", code])
+    seen = None
+    for _ in range(100):
+        @ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+        def cb(hwnd, _):
+            nonlocal seen
+            title = ctypes.create_unicode_buffer(256)
+            user32.GetWindowTextW(hwnd, title, 256)
+            if title.value == "Browse For Folder" and user32.IsWindowVisible(hwnd):
+                seen = {"topmost": bool(user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)}
+                user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+            return True
+        user32.EnumWindows(cb, 0)
+        if seen:
+            break
+        time.sleep(0.2)
+    p.wait(60)
+    print("[no-console-current] dialog seen:", seen)
+    print("[no-console-current] result:", out.read_text() if out.exists() else None)
+
+
 if __name__ == "__main__":
     which = sys.argv[1] if len(sys.argv) > 1 else "current"
+    if which == "no-console-current":
+        probe_no_console_current()
+        sys.exit(0)
     if which == "current":
         d = probe_script("current", CURRENT)
         sys.exit(0)        # diagnostic only
